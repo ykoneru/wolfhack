@@ -1,7 +1,7 @@
 /** Shared scoring rules for Last Door. Keep these in sync with pipeline/rules.py. */
 
 export const RADIUS_MILES = 3
-export const EXPOSED_BURDEN_MIN = 0.4
+export const EXPOSED_BURDEN_MIN = 0.3
 export const HEAT_FLOOR_F = 75
 export const HEAT_SPAN_F = 35
 export const AQI_SPAN = 200

@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 
 RADIUS_MILES = 3.0
-EXPOSED_BURDEN_MIN = 0.40
+EXPOSED_BURDEN_MIN = 0.30
 HEAT_FLOOR_F = 75.0
 HEAT_SPAN_F = 35.0
 AQI_SPAN = 200.0
