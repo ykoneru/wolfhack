@@ -1,0 +1,4 @@
+dist/
+# Generated from the canonical files in ../data/
+public/tracts.geojson
+public/sites.geojson
