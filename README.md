@@ -20,11 +20,11 @@ Vulnerability is the average of `share_age_65_plus`, `poverty_rate`, and `share_
 - Heat risk is `(temperature_f - 75) / 35`, clamped to 0–1.
 - Air risk is `aqi / 200`, clamped to 0–1.
 - Burden is `0.5 * vulnerability + 0.35 * heat risk + 0.15 * air risk`.
-- A tract is exposed when burden is at least `0.40`.
+- A tract is exposed when burden is at least `0.30`.
 - A tract is covered when the nearest open site is within `3` miles.
 - A tract is uncovered when it is exposed and not covered.
 
-The 3-mile radius and the `0.40` burden cutoff are starting values. Tune them in the state run if the Triangle is already red at 2pm, or if almost nothing turns red at 6pm. The “I am here” walk speed is 3 miles per hour, which is separate from the coverage radius.
+The 3-mile radius stays. The state run uses a `0.30` burden cutoff so 6pm uncovers more people than 2pm. The “I am here” walk speed is 3 miles per hour, which is separate from the coverage radius.
 
 The same constants live in `pipeline/rules.py` and `web/src/rules.js`. Change them together, on `main`.
 
