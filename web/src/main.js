@@ -1,6 +1,7 @@
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import './style.css'
+import { formatHour, tractColor, validateHours, createPlayback } from './hours.js'
 
 const triangleBounds = [[35.68, -79.08], [36.08, -78.48]]
 const map = L.map('map', { zoomControl: false, preferCanvas: true }).setView([35.6, -79.8], 7)
@@ -23,12 +24,34 @@ L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
 }).addTo(map)
 
 const hour = document.querySelector('#hour')
-hour.addEventListener('input', () => {
-  const label = `${Number(hour.value) - 12}:00 PM`
+const playButton = document.querySelector('#play')
+let hourlyData
+let mapLayers
+function renderHour(value) {
+  hour.value = value
+  const label = formatHour(value)
   document.querySelector('#hour-value').value = label
   hour.setAttribute('aria-valuetext', label)
-  // Step 4: all shapes and sites remain visible; scoring comes later.
+  if (!hourlyData) return
+  const snapshot = hourlyData.by_hour[value]
+  for (const [id, { layer }] of mapLayers) {
+    layer.setStyle({ fillColor: tractColor(snapshot.tracts[id]), fillOpacity: 0.65 })
+  }
+  document.querySelector('#uncovered-population').textContent = snapshot.uncovered_population.toLocaleString('en-US')
+  document.querySelector('#impact-hour').textContent = label
+}
+const playback = createPlayback(renderHour, {
+  onPlaying(playing) {
+    playButton.textContent = playing ? 'Pause' : '▶ Play 4–7 PM'
+    playButton.setAttribute('aria-pressed', String(playing))
+  },
 })
+hour.addEventListener('input', () => {
+  playback.pause()
+  renderHour(Number(hour.value))
+})
+playButton.addEventListener('click', () => playback.isPlaying() ? playback.pause() : playback.play())
+document.addEventListener('visibilitychange', () => { if (document.hidden) playback.pause() })
 
 async function readCollection(name, types) {
   const response = await fetch(`${import.meta.env.BASE_URL}${name}.geojson`)
@@ -72,6 +95,7 @@ async function loadMap() {
         layers.set(feature.properties.id, { feature, layer })
       },
     }).addTo(map)
+    mapLayers = layers
     const options = document.createDocumentFragment()
     for (const feature of [...tracts.features].sort((a, b) => a.properties.name.localeCompare(b.properties.name, 'en', { numeric: true }) || a.properties.id.localeCompare(b.properties.id))) {
       const option = document.createElement('option')
@@ -115,6 +139,19 @@ async function loadMap() {
     loaded = true
     status.hidden = !tileFailed
     if (tileFailed) showStatus('Some background tiles could not load. Tracts and sites are still available.')
+    try {
+      const response = await fetch(`${import.meta.env.BASE_URL}hours.json`)
+      if (!response.ok) throw new Error(`Hourly data request returned ${response.status}`)
+      hourlyData = validateHours(await response.json(), tracts.features)
+      hour.disabled = playButton.disabled = false
+      document.querySelector('#hour-note').textContent = 'Play shows how access changes from 4 PM to 7 PM.'
+      document.querySelector('#impact-note').textContent = 'Computed from local hourly data.'
+      renderHour(14)
+    } catch (error) {
+      document.querySelector('#hour-note').textContent = 'Hourly data unavailable · playback disabled'
+      document.querySelector('#impact-note').textContent = 'Could not load matching hours.json data. Tracts remain unscored.'
+      console.error('Hourly coverage:', error)
+    }
   } catch (error) {
     showStatus('Could not load the local tract and site files. Run npm run sync:data, then refresh.')
     console.error('NC map:', error)

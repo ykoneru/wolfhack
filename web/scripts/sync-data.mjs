@@ -1,4 +1,5 @@
 import { readFile, mkdir, copyFile } from 'node:fs/promises'
+import { validateHours } from '../src/hours.js'
 
 const publicDirectory = new URL('../public/', import.meta.url)
 await mkdir(publicDirectory, { recursive: true })
@@ -13,3 +14,7 @@ for (const name of ['tracts', 'sites']) {
   await copyFile(source, new URL(`${name}.geojson`, publicDirectory))
   console.log(`Copied ${data.features.length.toLocaleString('en-US')} ${name} to web/public`)
 }
+const tracts = JSON.parse(await readFile(new URL('tracts.geojson', publicDirectory), 'utf8'))
+const hours = JSON.parse(await readFile(new URL('hours.json', publicDirectory), 'utf8'))
+validateHours(hours, tracts.features)
+console.log('Validated hours.json against every tract and population total')
