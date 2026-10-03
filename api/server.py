@@ -1,23 +1,20 @@
-"""Recommend which buildings to keep open.
+"""FlowMap API. Estimated activity and a best time to go.
 
 Run from the repo root:
 
     .venv/bin/python api/server.py
 
+GET /activity?hour=17
+GET /places?search=crabtree
+GET /series?tract_id=37183052505
 POST /recommend
-{"hour": 18, "keep_open": ["osm-way-858326878"]}
+{"place_id": "...", "earliest": 16, "latest": 21, "minimum_visit_minutes": 45, "hour": 17}
 
 POST /explain
-{"hour": 18, "keep_open": []}
+POST /speak
+{"text": "Estimated activity is lower at 8:00 PM."}
 
-POST /dispatch
-{"hour": 18, "keep_open": []}
-
-GET /chart
-
-hour is 14 through 20. keep_open is optional.
-/dispatch returns audio. A second request with the same buildings reads the saved file.
-/chart returns uncovered population by hour. It reads Tiger Data, then hours.json.
+POST /plan writes go:{place id}:{HHMM} on Solana devnet when the wallet is funded.
 """
 
 from __future__ import annotations
@@ -26,6 +23,7 @@ import json
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 import requests
 
@@ -33,58 +31,22 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from api.chart import chart  # noqa: E402
-from api.dispatch import dispatch  # noqa: E402
-from api.explain import explain  # noqa: E402
-from pipeline.rules import EXPOSED_BURDEN_MIN, HOURS  # noqa: E402
-from pipeline.score_hours import load_features, prepare, recommend, score_hour  # noqa: E402
+from api.commit import send_memo, wallet_ready  # noqa: E402
+from api.dispatch import synthesize  # noqa: E402
+from api.flow import driving_route, explain, load_model, recommend, search_places, series  # noqa: E402
+from pipeline.flowmap import HOURS, clock_label  # noqa: E402
 
-TRACTS_PATH = ROOT / "data" / "tracts.geojson"
-SITES_PATH = ROOT / "data" / "sites.geojson"
 MODEL: dict = {}
 
 
-def load_model() -> None:
-    tracts, sites, nearby = prepare(load_features(TRACTS_PATH), load_features(SITES_PATH))
-    MODEL["tracts"] = tracts
-    MODEL["sites"] = sites
-    MODEL["nearby"] = nearby
-    MODEL["names"] = {site["id"]: site["name"] for site in sites}
-    print(f"loaded {len(tracts)} tracts and {len(sites)} sites", flush=True)
-
-
-def build_response(hour: int, keep_open: list[str]) -> dict:
-    if hour not in HOURS:
-        raise ValueError(f"hour must be one of {HOURS}")
-    known = MODEL["names"]
-    forced = {site_id for site_id in keep_open if site_id in known}
-    scored = score_hour(MODEL["tracts"], MODEL["sites"], MODEL["nearby"], hour, EXPOSED_BURDEN_MIN, forced)
-    picks = recommend(MODEL["tracts"], MODEL["sites"], MODEL["nearby"], hour, EXPOSED_BURDEN_MIN, forced)
-    for pick in picks:
-        pick["name"] = known.get(pick["site_id"], pick["site_id"])
-    return {
-        "hour": hour,
-        "keep_open": sorted(forced),
-        "uncovered_population": scored["uncovered_population"],
-        "recommendations": {"1": picks[:1], "3": picks[:3], "5": picks[:5]},
-        "tracts": scored["tracts"],
-    }
-
-
-def explain_response(hour: int, keep_open: list[str]) -> dict:
-    if hour not in HOURS:
-        raise ValueError(f"hour must be one of {HOURS}")
-    return explain(MODEL, hour, keep_open)
-
-
-def dispatch_response(hour: int, keep_open: list[str]) -> tuple[bytes, bool]:
-    if hour not in HOURS:
-        raise ValueError(f"hour must be one of {HOURS}")
-    return dispatch(MODEL, hour, keep_open)
+def load() -> None:
+    MODEL.clear()
+    MODEL.update(load_model())
+    print(f"loaded {len(MODEL['activity']['tracts'])} tracts and {len(MODEL['places'])} places", flush=True)
 
 
 class Handler(BaseHTTPRequestHandler):
-    def _send(self, status: int, payload: dict) -> None:
+    def _send(self, status: int, payload: dict | list) -> None:
         body = json.dumps(payload).encode()
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
@@ -95,11 +57,10 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _send_audio(self, audio: bytes, cached: bool) -> None:
+    def _send_audio(self, audio: bytes) -> None:
         self.send_response(200)
         self.send_header("Content-Type", "audio/mpeg")
         self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("X-Cache", "hit" if cached else "miss")
         self.send_header("Content-Length", str(len(audio)))
         self.end_headers()
         self.wfile.write(audio)
@@ -108,35 +69,90 @@ class Handler(BaseHTTPRequestHandler):
         self._send(204, {})
 
     def do_GET(self) -> None:  # noqa: N802
-        path = self.path.split("?", 1)[0]
-        if path != "/chart":
+        parsed = urlparse(self.path)
+        query = parse_qs(parsed.query)
+        try:
+            if parsed.path == "/activity":
+                hour = int(query.get("hour", ["17"])[0])
+                if hour not in HOURS:
+                    raise ValueError("hour is outside 8am to 10pm")
+                scores = {
+                    tract_id: {"score": block[str(hour)]["score"], "category": block[str(hour)]["category"]}
+                    for tract_id, block in MODEL["activity"]["tracts"].items()
+                }
+                self._send(200, {"hour": hour, "label": clock_label(hour), "scores": scores})
+                return
+            if parsed.path == "/places":
+                self._send(200, {"places": search_places(MODEL, query.get("search", [""])[0])})
+                return
+            if parsed.path == "/series":
+                self._send(200, series(MODEL, query.get("tract_id", [""])[0]))
+                return
+            if parsed.path == "/plan":
+                self._send(200, {"ready": wallet_ready()})
+                return
+            if parsed.path == "/route":
+                self._send(
+                    200,
+                    driving_route(
+                        float(query.get("from_lat", ["0"])[0]),
+                        float(query.get("from_lon", ["0"])[0]),
+                        float(query.get("to_lat", ["0"])[0]),
+                        float(query.get("to_lon", ["0"])[0]),
+                    ),
+                )
+                return
+        except KeyError:
             self._send(404, {"error": "not found"})
             return
-        self._send(200, chart())
+        except ValueError as error:
+            self._send(400, {"error": str(error)})
+            return
+        self._send(404, {"error": "not found"})
 
     def do_POST(self) -> None:  # noqa: N802
-        path = self.path.split("?", 1)[0]
-        if path not in {"/recommend", "/explain", "/dispatch"}:
+        path = urlparse(self.path).path
+        if path not in {"/recommend", "/explain", "/speak", "/plan"}:
             self._send(404, {"error": "not found"})
             return
         length = int(self.headers.get("Content-Length", "0"))
         try:
             payload = json.loads(self.rfile.read(length) or b"{}")
-            hour = int(payload.get("hour", 18))
-            keep_open = payload.get("keep_open") or []
-            if not isinstance(keep_open, list):
-                raise ValueError("keep_open must be a list of site ids")
-            keep_open = [str(site_id) for site_id in keep_open]
+            if path == "/speak":
+                text = str(payload.get("text", "")).strip()
+                if not text:
+                    raise ValueError("text is required")
+                self._send_audio(synthesize(text[:800]))
+                return
+            place_id = str(payload.get("place_id", "")).strip()
+            if not place_id:
+                raise ValueError("place_id is required")
+            if path == "/plan":
+                hour = int(payload.get("hour", 20))
+                memo = f"go:{place_id}:{hour:02d}00"
+                signature = send_memo(memo)
+                self._send(
+                    200,
+                    {
+                        "memo": memo,
+                        "signature": signature,
+                        "explorer_url": f"https://explorer.solana.com/tx/{signature}?cluster=devnet",
+                    },
+                )
+                return
+            earliest = int(payload.get("earliest", 16))
+            latest = int(payload.get("latest", 21))
+            minimum = int(payload.get("minimum_visit_minutes", 45))
+            hour = int(payload.get("hour", 17))
             if path == "/explain":
-                self._send(200, explain_response(hour, keep_open))
-            elif path == "/dispatch":
-                audio, cached = dispatch_response(hour, keep_open)
-                self._send_audio(audio, cached)
-            else:
-                self._send(200, build_response(hour, keep_open))
+                self._send(200, explain(MODEL, place_id, earliest, latest, minimum, hour))
+                return
+            self._send(200, recommend(MODEL, place_id, earliest, latest, minimum, hour))
+        except KeyError:
+            self._send(404, {"error": "unknown place"})
         except (RuntimeError, requests.RequestException) as error:
             self._send(400, {"error": str(error)})
-        except (ValueError, KeyError, json.JSONDecodeError) as error:
+        except (ValueError, json.JSONDecodeError) as error:
             self._send(400, {"error": str(error)})
 
     def log_message(self, format: str, *args) -> None:
@@ -144,9 +160,9 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main() -> None:
-    load_model()
+    load()
     server = ThreadingHTTPServer(("127.0.0.1", 8000), Handler)
-    print("API at http://127.0.0.1:8000/recommend, /explain, /dispatch, and /chart", flush=True)
+    print("FlowMap API at http://127.0.0.1:8000/activity, /places, /recommend, /explain, and /series", flush=True)
     server.serve_forever()
 
 

@@ -3,81 +3,94 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#cc0000" />
-    <meta name="description" content="Explore North Carolina census tracts and community sites." />
-    <title>Last Door · North Carolina map</title>
+    <meta name="theme-color" content="#030303" />
+    <meta name="description" content="Estimated activity across Wake County and the best time to go." />
+    <title>FlowMap · Best time to go</title>
   </head>
   <body>
     <header class="masthead">
-      <a class="brand" href="/" aria-label="Last Door home"><span class="brand-icon" aria-hidden="true">↗</span> LAST DOOR<span class="brand-dot">.</span></a>
-      <span class="location">NORTH CAROLINA <span aria-hidden="true">/</span> THE TRIANGLE</span>
-      <span class="badge">NORTH CAROLINA EXPLORER</span>
+      <a class="brand" href="/">FLOWMAP</a>
+      <p class="tagline">Know when to leave.</p>
+      <form id="search-form" role="search">
+        <label class="sr" for="search">Search destination</label>
+        <input id="search" type="search" placeholder="Search a destination" autocomplete="off" />
+        <div id="search-results" class="search-results"></div>
+      </form>
+      <a class="method-link" href="/method.html">Method</a>
     </header>
+    <div class="toolbar">
+      <label for="hour">Time <output id="hour-label" for="hour">5:00 PM</output></label>
+      <input id="hour" type="range" min="8" max="22" value="17" step="1" />
+      <button id="play" type="button">Play</button>
+      <p class="scope">Typical weekday · Wake County · estimated activity, not a live crowd count</p>
+    </div>
+    <div class="tripbar">
+      <p id="origin-label">From NC State</p>
+      <button id="locate" type="button">I am here</button>
+      <button id="set-start" type="button">Set start on map</button>
+      <button class="demo" data-place="The Village Deli" type="button">Village Deli</button>
+      <button class="demo" data-place="Spring Rolls Asian Bistro and Sushi Bar" type="button">Spring Rolls</button>
+      <button class="demo" data-place="North Hills Club" type="button">North Hills Club</button>
+    </div>
     <main>
-      <section id="site-page" class="site-page" hidden aria-labelledby="site-title">
-        <a id="back-to-map" href="/">← Back to map</a>
-        <p class="eyebrow">COMMUNITY DOOR</p>
-        <h1 id="site-title" tabindex="-1">Loading site…</h1>
-        <p id="site-type" class="muted"></p>
-        <dl id="site-facts" class="site-facts"></dl>
-        <p id="site-detail-note" class="muted"></p>
-        <button id="site-show-map" type="button">Show on map</button>
-      </section>
-      <div id="map-page">
-      <section class="intro" aria-labelledby="page-title">
-        <div><p class="eyebrow">WATCH WHAT HAPPENS WHEN DOORS CLOSE</p><h1 id="page-title">When doors close, who loses access?</h1></div>
-        <p class="intro-copy">Explore nearby refuge access.<br />Press Play to follow the afternoon.</p>
-      </section>
-      <section class="workspace" aria-label="North Carolina map explorer">
-        <aside class="sidebar">
-          <div class="panel-heading"><p class="eyebrow">ON THE MAP</p><span class="count" id="tract-count">—</span></div>
-          <h2>Across the state.<br />Close to home.</h2>
-          <p class="muted">Census tracts and community locations across North Carolina.</p>
-          <div class="coverage-legend" aria-label="Tract colors">
-            <div><span class="swatch uncovered-swatch" aria-hidden="true"></span> High burden, uncovered</div>
-            <div><span class="swatch covered-swatch" aria-hidden="true"></span> High burden, covered</div>
-            <div><span class="swatch" aria-hidden="true"></span> Lower burden / unscored</div><div><span class="swatch" style="background:#facc15" aria-hidden="true"></span> Building kept open</div>
-          </div>
-          <div class="impact" aria-live="polite" aria-atomic="true">
-            <p class="eyebrow">WITHOUT A NEARBY OPEN DOOR</p>
-            <p id="uncovered-population">—</p>
-            <p class="impact-caption">people uncovered at <span id="impact-hour">2:00 PM</span></p>
-          </div>
-          <p id="impact-note" class="muted">Loading computed hourly data…</p>
-          <fieldset id="staffing" class="staffing" disabled>
-            <legend>Keep buildings open</legend>
-            <label><input type="radio" name="staffing" value="0" checked /> None</label>
-            <label><input type="radio" name="staffing" value="1" /> 1</label>
-            <label><input type="radio" name="staffing" value="3" /> 3</label>
-            <label><input type="radio" name="staffing" value="5" /> 5</label>
-          </fieldset>
-          <p id="saved-population" class="rescue-summary" aria-live="polite"></p>
-          <div id="recommendation-list" class="recommendation-list"></div>
-          <div class="legend site-legend"><span class="site-swatch" aria-hidden="true"></span> Community sites <span class="legend-note" id="site-count">—</span></div>
-          <p class="muted">Libraries, community centers, shelters, and hospitals where present in the dataset.</p>
-          <div class="view-controls"><button id="view-state" type="button" disabled>All North Carolina</button><button id="view-triangle" type="button" disabled>The Triangle</button></div>
-          <button id="locate" class="locate-button" type="button" aria-pressed="false" disabled>I am here · choose on map</button>
-          <div id="walk-result" class="walk-result" role="status">Choose a point to check the nearest open door.</div>
-          <label class="eyebrow picker-label" for="tract-picker">FIND A TRACT</label>
-          <select id="tract-picker" disabled><option value="">Choose a census tract…</option></select>
-          <div class="selection"><p class="eyebrow">SELECTED TRACT</p><p id="selected-name" aria-live="polite">Choose a tract on the map.</p></div>
-          <p class="fixture-note">Census tract boundaries · OpenStreetMap &amp; NC OneMap sites.<br />Coverage uses the radius and burden cutoff in the hourly data.</p>
-        </aside>
-        <div class="map-column">
-          <div class="map-frame">
-            <div id="map" aria-label="Map of North Carolina census tracts and sites"></div>
-            <div class="map-label"><span class="map-dot" aria-hidden="true"></span> North Carolina</div>
-            <p class="map-status" id="map-status" role="status">Loading North Carolina tracts and sites…</p>
-          </div>
-          <div class="timeline">
-            <div class="timeline-heading"><label for="hour">TIME OF DAY</label><output id="hour-value" for="hour">2:00 PM</output><button id="play" type="button" aria-pressed="false" disabled>▶ Play 4–7 PM</button><span class="timeline-note" id="hour-note">Loading hourly data…</span></div>
-            <input id="hour" type="range" min="14" max="20" step="1" value="14" aria-describedby="hour-note" aria-valuetext="2:00 PM" disabled />
-            <div class="ticks" aria-hidden="true"><span>2 PM</span><span>3 PM</span><span>4 PM</span><span>5 PM</span><span>6 PM</span><span>7 PM</span><span>8 PM</span></div>
-          </div>
+      <div id="map"></div>
+      <aside id="panel">
+        <div class="route-card" id="route-card" hidden>
+          <p class="eyebrow">ROUTE</p>
+          <p id="route-summary">—</p>
+          <p id="leave-by"></p>
         </div>
-      </section>
-      </div>
-      <footer><span>Built for the places we call home.</span><span>LOCAL GEOSPATIAL DATA <span class="footer-dot">●</span> STEP 10</span></footer>
+        <div id="compare" class="compare"></div>
+        <p id="shift"></p>
+        <p class="eyebrow" id="place-category">DESTINATION</p>
+        <h1 id="place-name">Choose a place</h1>
+        <p id="place-hours" class="muted"></p>
+        <p class="eyebrow">ESTIMATED ACTIVITY</p>
+        <p id="current-score" class="score">—</p>
+        <div class="meter" aria-hidden="true"><span id="meter-fill"></span></div>
+        <p id="current-category"></p>
+        <div class="best">
+          <p class="eyebrow">BEST TIME TO GO</p>
+          <p id="best-time">—</p>
+          <p id="best-score" class="muted"></p>
+        </div>
+        <p id="explanation"></p>
+        <div class="factors" id="factors"></div>
+        <div id="chart" class="chart" aria-label="Estimated activity by hour"></div>
+        <p id="series-source" class="muted"></p>
+        <p id="context" class="muted"></p>
+        <div class="window">
+          <label>Earliest <input id="earliest" type="number" min="8" max="22" value="16" /></label>
+          <label>Latest <input id="latest" type="number" min="8" max="22" value="21" /></label>
+          <label>Visit minutes <input id="minimum" type="number" min="15" max="180" value="45" /></label>
+        </div>
+        <div class="actions">
+          <button id="hear" type="button">Hear why</button>
+          <button id="save-plan" type="button" hidden>Save this plan</button>
+        </div>
+        <p id="plan-note" class="muted"></p>
+        <div class="student">
+          <p class="eyebrow">BEFORE CLASS</p>
+          <label>Back by <input id="class-hour" type="number" min="9" max="22" value="14" /></label>
+          <label>Errand
+            <select id="errand">
+              <option value="grocery">Groceries</option>
+              <option value="restaurant">Food</option>
+              <option value="gym">Gym</option>
+              <option value="cafe">Coffee</option>
+            </select>
+          </label>
+          <button id="plan-errand" type="button">Plan the errand</button>
+          <p id="errand-note" class="muted"></p>
+        </div>
+        <ul class="legend" aria-label="Activity colors">
+          <li><span class="swatch" style="background:#8fbfa8"></span> Quiet under 26</li>
+          <li><span class="swatch" style="background:#b7c98a"></span> Light</li>
+          <li><span class="swatch" style="background:#e6c35c"></span> Moderate</li>
+          <li><span class="swatch" style="background:#e07a3d"></span> Busy</li>
+          <li><span class="swatch" style="background:#c23b3b"></span> Very busy</li>
+        </ul>
+      </aside>
     </main>
     <script type="module" src="/src/main.js"></script>
   </body>

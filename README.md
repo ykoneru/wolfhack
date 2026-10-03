@@ -1,58 +1,22 @@
-# Last Door
+# FlowMap
 
-Last Door ranks North Carolina census tracts by who loses their nearest cool public building when doors close around 5pm, then names the few buildings to keep open.
+FlowMap estimates when Wake County is likely to be more or less active on a typical weekday, then recommends a time to visit a place. It is not a live crowd count and it is not a traffic app.
 
-This repository is the step 0 contract. The files below are fixtures so the map and the data pipeline can be built separately. They are not the Census pull.
+The score adds population density, Census commute-departure timing, OpenStreetMap destinations, and road-and-bus connectivity. Parks get a small weather and air-quality adjustment from 2pm to 8pm. The best time is the lowest score in the user’s window that still leaves a 45-minute visit before the place closes.
 
-## Who edits what
-
-- Data and API: `pipeline/`, `api/`, and `data/`
-- Map and pages: `web/`
-- Generated files the pipeline may write later: `web/public/tracts.geojson`, `web/public/sites.geojson`, and `web/public/hours.json`
-- Do not commit `.env`. Copy `.env.example` when you start calling APIs.
-
-## Scoring rules
-
-Distance is haversine miles from a tract centroid to a site. A site is open when the selected hour is earlier than `close_hour`. A `close_hour` of `null` means the site stays open. Hospitals use that. A committed site stays open.
-
-Vulnerability is the average of `share_age_65_plus`, `poverty_rate`, and `share_households_no_vehicle`.
-
-- Heat risk is `(temperature_f - 75) / 35`, clamped to 0–1.
-- Air risk is `aqi / 200`, clamped to 0–1.
-- Burden is `0.5 * vulnerability + 0.35 * heat risk + 0.15 * air risk`.
-- A tract is exposed when burden is at least `0.30`.
-- A tract is covered when the nearest open site is within `3` miles.
-- A tract is uncovered when it is exposed and not covered.
-
-The 3-mile radius stays. The state run uses a `0.30` burden cutoff so 6pm uncovers more people than 2pm. The “I am here” walk speed is 3 miles per hour, which is separate from the coverage radius.
-
-The same constants live in `pipeline/rules.py` and `web/src/rules.js`. Change them together, on `main`.
-
-## Sample
-
-`data/sample/` is the source. `web/public/sample/` is a copy the map can load. Five tracts, three sites, hours `14` through `20` (2pm through 8pm).
-
-At 2pm every sample tract is covered. At 5pm the library and the community center close, four tracts become uncovered, and the hospital tract stays covered. Keeping the library open covers 8,400 people. Keeping the community center open covers 8,000. The first rescue pick is the library.
-
-Rebuild and check the fixtures with:
+## Run
 
 ```bash
-python3 pipeline/build_sample.py
-python3 pipeline/check_sample.py
+.venv/bin/python pipeline/build_flowmap.py
+.venv/bin/python api/server.py
 ```
 
-## Tract fields
+The map is in `web/`:
 
-`tracts.geojson` properties: `id`, `name`, `population`, `share_age_65_plus`, `poverty_rate`, `share_households_no_vehicle`, `centroid` as `[lon, lat]`, `aqi`, `air_risk`, and `hourly`. Each hour has `temperature_f`, `heat_risk`, and `burden`.
+```bash
+cd web
+npm install
+npm run dev
+```
 
-## Site fields
-
-`sites.geojson` properties: `id`, `name`, `type`, `close_hour`, `hours_source`. Geometry is a point. `hours_source` is `osm`, `default`, or `nconemap`.
-
-## Hours file
-
-`hours.json` has `radius_miles`, `exposed_burden_min`, `hours`, and `by_hour`. Each hour has `uncovered_population`, a `tracts` object, and `recommendations` for `"1"`, `"3"`, and `"5"` buildings. A recommendation entry has `site_id` and `people_added`.
-
-## Branches
-
-`main` only receives a step after its check passes. Data work stays on `data`. Map work stays on `web`.
+The method page explains the weights, the opening-hour defaults, and the limits. Do not commit `.env`.

@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>FlowMap method</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <article class="method">
+      <p><a href="/">← FlowMap</a></p>
+      <h1>How the estimate is made</h1>
+      <p>FlowMap estimates how active a Wake County census tract is likely to be on a typical weekday. It is not a live crowd count and it is not a traffic measurement.</p>
+      <h2>Score</h2>
+      <p>Each hour from 8am to 10pm gets a score from 0 to 100:</p>
+      <ul>
+        <li>Population, up to 20 points, from people per square kilometer compared with the 95th percentile in Wake County.</li>
+        <li>Commute, up to 25 points, from American Community Survey table B08302, time leaving home for work.</li>
+        <li>Destinations, up to 30 points, from OpenStreetMap places inside the tract.</li>
+        <li>Connectivity, up to 15 points, from major-road segments and bus stops. This is network connectivity, not traffic.</li>
+        <li>Weather, a small adjustment on parks only, using the stored afternoon forecast from 2pm to 8pm.</li>
+      </ul>
+      <p>Quiet is 0–25, Light is 26–45, Moderate is 46–65, Busy is 66–80, and Very Busy is 81–100.</p>
+      <h2>Time of day</h2>
+      <p>A place does not count the same at every hour. Coffee shops, schools, and universities weigh more in the morning. Restaurants and shopping weigh more at midday and in the early evening. Bars and entertainment weigh more at night. A place contributes nothing in an hour when it is closed.</p>
+      <p>The Census groups 4:00pm to 11:59pm as one departure bin. FlowMap places that share on 4pm, 5pm, and 6pm. It does not treat 7pm to 10pm as a measured commute. The noon-to-4pm bin is split evenly across those hours because the table is not hourly.</p>
+      <h2>Opening hours</h2>
+      <p>When OpenStreetMap includes a simple opening-hours string, that range is used. Otherwise FlowMap uses a weekday default and labels it estimated. Defaults include coffee 7am–7pm, restaurants 11am–10pm, grocery 7am–11pm, gyms 6am–10pm, shopping 10am–9pm, schools 7am–4pm, and parks 6am–9pm. These defaults are not a confirmed schedule.</p>
+      <h2>Route and leave time</h2>
+      <p>The line on the map is a driving route along roads. Leave time is that drive subtracted from the quieter arrival hour. If the road service is unavailable, the line is straight and the minutes assume 25 miles per hour. The before-class planner uses that same 25 mile-per-hour estimate to find a nearby stop you can reach, visit, and return from before the class hour.</p>
+      <h2>Best time to go</h2>
+      <p>The recommendation is the hour in the user’s window with the lowest estimated activity that still leaves the minimum visit, 45 minutes unless changed, before the place closes. The quietest hour is skipped when the visit would not fit.</p>
+      <h2>Weather and air</h2>
+      <p>Parks are reduced 10% at or above 90°F and raised 10% between 65°F and 82°F. Air quality at or above 101 reduces parks another 10%. Hours outside the stored 2pm–8pm forecast are not weather-adjusted. Rain is not in that file, so it is not applied.</p>
+      <h2>What this cannot say</h2>
+      <p>There is no foot-traffic sensor, no live vehicle count, and no wait time. A Gemini reply may only restate these scores. If that call fails, the same facts are written out directly.</p>
+    </article>
+  </body>
+</html>

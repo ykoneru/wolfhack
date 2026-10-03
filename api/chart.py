@@ -149,6 +149,98 @@ def rows_from_tiger(rows: list[dict]) -> list[dict]:
     ]
 
 
+def field_chart(field: dict) -> dict:
+    """Store one field's afternoon and read it back. The file is the backup."""
+    rows = [
+        {
+            "hour": int(hour),
+            "label": block["label"],
+            "index": block["index"],
+            "crossed": block["crossed"],
+            "sky": block["sky"],
+            "ground": block["ground"],
+            "air": block["air"],
+        }
+        for hour, block in field["hourly"].items()
+    ]
+    url = database_url()
+    if not url:
+        return {"source": "fields.json", "field_id": field["id"], "line": 1.0, "hours": rows}
+    try:
+        stored = _field_rows_from_tiger(url, field["id"], rows)
+    except Exception as error:
+        message = str(error).replace(url, "TIGER_DATABASE_URL")
+        print(f"tiger unavailable, using fields.json: {message}", flush=True)
+        return {"source": "fields.json", "field_id": field["id"], "line": 1.0, "hours": rows}
+    if not stored:
+        return {"source": "fields.json", "field_id": field["id"], "line": 1.0, "hours": rows}
+    return {"source": "tiger", "field_id": field["id"], "line": 1.0, "hours": stored}
+
+
+def _field_rows_from_tiger(url: str, field_id: str, rows: list[dict]) -> list[dict]:
+    import psycopg
+
+    with psycopg.connect(url, connect_timeout=8, autocommit=True) as connection:
+        try:
+            connection.execute("CREATE EXTENSION IF NOT EXISTS timescaledb")
+        except Exception:
+            pass
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS field_hour (
+                field_id text NOT NULL,
+                observed_at timestamptz NOT NULL,
+                hour smallint NOT NULL,
+                field_index double precision NOT NULL,
+                crossed boolean NOT NULL,
+                PRIMARY KEY (field_id, observed_at)
+            )
+            """
+        )
+        try:
+            connection.execute(
+                "SELECT create_hypertable('field_hour', 'observed_at', if_not_exists => TRUE)"
+            )
+        except Exception:
+            pass
+        for row in rows:
+            observed_at = SCENARIO_DAY.replace(hour=row["hour"])
+            connection.execute(
+                """
+                INSERT INTO field_hour (field_id, observed_at, hour, field_index, crossed)
+                VALUES (%s, %s, %s, %s, %s)
+                ON CONFLICT (field_id, observed_at)
+                DO UPDATE SET field_index = EXCLUDED.field_index, crossed = EXCLUDED.crossed
+                """,
+                (field_id, observed_at, row["hour"], row["index"], row["crossed"]),
+            )
+        fetched = connection.execute(
+            """
+            SELECT hour, field_index, crossed
+            FROM field_hour
+            WHERE field_id = %s
+            ORDER BY hour
+            """,
+            (field_id,),
+        ).fetchall()
+    by_hour = {row["hour"]: row for row in rows}
+    stored = []
+    for hour, index, crossed in fetched:
+        original = by_hour.get(int(hour), {})
+        stored.append(
+            {
+                "hour": int(hour),
+                "label": hour_label(int(hour)),
+                "index": round(float(index), 4),
+                "crossed": bool(crossed),
+                "sky": original.get("sky"),
+                "ground": original.get("ground"),
+                "air": original.get("air"),
+            }
+        )
+    return stored
+
+
 def chart() -> dict:
     rows = rows_from_file()
     url = database_url()

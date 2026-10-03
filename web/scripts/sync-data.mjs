@@ -1,20 +1,11 @@
-import { readFile, mkdir, copyFile } from 'node:fs/promises'
-import { validateHours } from '../src/hours.js'
+import { readFile } from 'node:fs/promises'
 
-const publicDirectory = new URL('../public/', import.meta.url)
-await mkdir(publicDirectory, { recursive: true })
-for (const name of ['tracts', 'sites']) {
-  const source = new URL(`../../data/${name}.geojson`, import.meta.url)
-  const data = JSON.parse(await readFile(source, 'utf8'))
-  const types = name === 'tracts' ? ['Polygon', 'MultiPolygon'] : ['Point']
-  if (data.type !== 'FeatureCollection' || !data.features?.length ||
-      data.features.some(feature => !types.includes(feature.geometry?.type) || !feature.properties?.id || !feature.properties?.name)) {
-    throw new Error(`Invalid ${name}.geojson: expected named ${types.join('/')} features`)
-  }
-  await copyFile(source, new URL(`${name}.geojson`, publicDirectory))
-  console.log(`Copied ${data.features.length.toLocaleString('en-US')} ${name} to web/public`)
-}
-const tracts = JSON.parse(await readFile(new URL('tracts.geojson', publicDirectory), 'utf8'))
-const hours = JSON.parse(await readFile(new URL('hours.json', publicDirectory), 'utf8'))
-validateHours(hours, tracts.features)
-console.log('Validated hours.json against every tract and population total')
+const activity = JSON.parse(await readFile(new URL('../public/activity.json', import.meta.url), 'utf8'))
+const places = JSON.parse(await readFile(new URL('../public/places.json', import.meta.url), 'utf8'))
+const tracts = JSON.parse(await readFile(new URL('../public/wake-tracts.geojson', import.meta.url), 'utf8'))
+if (!activity.tracts || !activity.demo_place_id) throw new Error('activity.json is not a FlowMap file')
+if (!places.places?.length) throw new Error('places.json is empty')
+if (tracts.type !== 'FeatureCollection' || !tracts.features?.length) throw new Error('wake-tracts.geojson is empty')
+const sample = activity.tracts[tracts.features[0].properties.id]
+if (!sample?.['17']) throw new Error('activity.json is missing the 5pm score')
+console.log(`FlowMap ready: ${tracts.features.length} Wake County tracts, ${places.places.length.toLocaleString('en-US')} places`)

@@ -1,4 +1,4 @@
-"""Shared scoring rules for Last Door. Keep these in sync with web/src/rules.js."""
+"""Shared scoring rules. Field Call uses sky, ground, and air together."""
 
 from __future__ import annotations
 
@@ -24,6 +24,18 @@ def heat_risk(temperature_f: float) -> float:
 
 def air_risk(aqi: float) -> float:
     return clamp(aqi / AQI_SPAN)
+
+
+FIELD_LINE = 1.0
+GROUND_SPAN_F = 10.0
+
+
+def field_parts(forecast_f: float, temperature_f: float, aqi: float | None) -> tuple[float, float, float, float]:
+    """Sky, pavement, and air. Each can stay under the line while the sum crosses it."""
+    sky = heat_risk(forecast_f)
+    ground = clamp((temperature_f - forecast_f) / GROUND_SPAN_F)
+    air = 0.0 if aqi is None else air_risk(aqi)
+    return sky, ground, air, sky + ground + air
 
 
 def vulnerability(share_age_65_plus: float, poverty_rate: float, share_households_no_vehicle: float) -> float:
