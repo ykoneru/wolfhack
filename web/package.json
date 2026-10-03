@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "test": "node --test src/hours.test.js",
+    "test": "node --test src/*.test.js",
     "sync:data": "node scripts/sync-data.mjs",
     "predev": "npm run sync:data",
     "prebuild": "npm run sync:data",
@@ -12,7 +12,13 @@
     "build": "vite build",
     "preview": "vite preview --host 127.0.0.1"
   },
-  "dependencies": { "leaflet": "1.9.4" },
-  "devDependencies": { "vite": "^7.1.0" },
-  "engines": { "node": "^20.19.0 || >=22.12.0" }
+  "dependencies": {
+    "leaflet": "1.9.4"
+  },
+  "devDependencies": {
+    "vite": "^7.1.0"
+  },
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
+  }
 }

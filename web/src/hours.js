@@ -15,6 +15,9 @@ export function tractColor(tract) {
 }
 
 export function validateHours(document, features) {
+  if (!Number.isFinite(document.radius_miles) || document.radius_miles <= 0) {
+    throw new Error('Hourly data must specify a positive coverage radius')
+  }
   const required = [14, 15, 16, 17, 18, 19, 20]
   if (!Array.isArray(document.hours) || required.some(h => !document.hours.includes(h))) {
     throw new Error('Hourly data must contain every hour from 2 PM through 8 PM')

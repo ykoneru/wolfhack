@@ -9,11 +9,21 @@
   </head>
   <body>
     <header class="masthead">
-      <a class="brand" href="./" aria-label="Last Door home"><span class="brand-icon" aria-hidden="true">↗</span> LAST DOOR<span class="brand-dot">.</span></a>
+      <a class="brand" href="/" aria-label="Last Door home"><span class="brand-icon" aria-hidden="true">↗</span> LAST DOOR<span class="brand-dot">.</span></a>
       <span class="location">NORTH CAROLINA <span aria-hidden="true">/</span> THE TRIANGLE</span>
       <span class="badge">NORTH CAROLINA EXPLORER</span>
     </header>
     <main>
+      <section id="site-page" class="site-page" hidden aria-labelledby="site-title">
+        <a id="back-to-map" href="/">← Back to map</a>
+        <p class="eyebrow">COMMUNITY DOOR</p>
+        <h1 id="site-title" tabindex="-1">Loading site…</h1>
+        <p id="site-type" class="muted"></p>
+        <dl id="site-facts" class="site-facts"></dl>
+        <p id="site-detail-note" class="muted"></p>
+        <button id="site-show-map" type="button">Show on map</button>
+      </section>
+      <div id="map-page">
       <section class="intro" aria-labelledby="page-title">
         <div><p class="eyebrow">WATCH WHAT HAPPENS WHEN DOORS CLOSE</p><h1 id="page-title">When doors close, who loses access?</h1></div>
         <p class="intro-copy">Explore nearby refuge access.<br />Press Play to follow the afternoon.</p>
@@ -26,7 +36,7 @@
           <div class="coverage-legend" aria-label="Tract colors">
             <div><span class="swatch uncovered-swatch" aria-hidden="true"></span> High burden, uncovered</div>
             <div><span class="swatch covered-swatch" aria-hidden="true"></span> High burden, covered</div>
-            <div><span class="swatch" aria-hidden="true"></span> Lower burden / unscored</div>
+            <div><span class="swatch" aria-hidden="true"></span> Lower burden / unscored</div><div><span class="swatch" style="background:#facc15" aria-hidden="true"></span> Building kept open</div>
           </div>
           <div class="impact" aria-live="polite" aria-atomic="true">
             <p class="eyebrow">WITHOUT A NEARBY OPEN DOOR</p>
@@ -34,9 +44,20 @@
             <p class="impact-caption">people uncovered at <span id="impact-hour">2:00 PM</span></p>
           </div>
           <p id="impact-note" class="muted">Loading computed hourly data…</p>
+          <fieldset id="staffing" class="staffing" disabled>
+            <legend>Keep buildings open</legend>
+            <label><input type="radio" name="staffing" value="0" checked /> None</label>
+            <label><input type="radio" name="staffing" value="1" /> 1</label>
+            <label><input type="radio" name="staffing" value="3" /> 3</label>
+            <label><input type="radio" name="staffing" value="5" /> 5</label>
+          </fieldset>
+          <p id="saved-population" class="rescue-summary" aria-live="polite"></p>
+          <div id="recommendation-list" class="recommendation-list"></div>
           <div class="legend site-legend"><span class="site-swatch" aria-hidden="true"></span> Community sites <span class="legend-note" id="site-count">—</span></div>
           <p class="muted">Libraries, community centers, shelters, and hospitals where present in the dataset.</p>
           <div class="view-controls"><button id="view-state" type="button" disabled>All North Carolina</button><button id="view-triangle" type="button" disabled>The Triangle</button></div>
+          <button id="locate" class="locate-button" type="button" aria-pressed="false" disabled>I am here · choose on map</button>
+          <div id="walk-result" class="walk-result" role="status">Choose a point to check the nearest open door.</div>
           <label class="eyebrow picker-label" for="tract-picker">FIND A TRACT</label>
           <select id="tract-picker" disabled><option value="">Choose a census tract…</option></select>
           <div class="selection"><p class="eyebrow">SELECTED TRACT</p><p id="selected-name" aria-live="polite">Choose a tract on the map.</p></div>
@@ -55,7 +76,8 @@
           </div>
         </div>
       </section>
-      <footer><span>Built for the places we call home.</span><span>LOCAL GEOSPATIAL DATA <span class="footer-dot">●</span> STEP 08</span></footer>
+      </div>
+      <footer><span>Built for the places we call home.</span><span>LOCAL GEOSPATIAL DATA <span class="footer-dot">●</span> STEP 10</span></footer>
     </main>
     <script type="module" src="/src/main.js"></script>
   </body>

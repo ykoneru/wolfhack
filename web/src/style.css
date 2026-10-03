@@ -81,3 +81,31 @@ footer > span:first-child { font-weight: 400; letter-spacing: .1px; font-size: 1
 .intro-copy { flex-shrink: 0; }
 #map { height: clamp(500px, 68vh, 800px); }
 @media (max-width: 650px) { #map { height: 390px; } .intro-copy { max-width: none; } #uncovered-population { font-size: 42px; } .timeline-note { max-width: none; width: 100%; text-align: left; } }
+[hidden] { display: none !important; }
+.staffing { border: 0; padding: 0; margin: 20px 0 10px; display: flex; gap: 9px; flex-wrap: wrap; }
+.staffing legend { font-size: 12px; font-weight: 650; margin-bottom: 10px; }
+.staffing label { display: flex; align-items: center; gap: 5px; padding: 8px; border: 1px solid #d5d8d0; border-radius: 3px; cursor: pointer; font-size: 12px; }
+.staffing label:has(input:checked) { background: #fff4c0; border-color: #a16207; }
+.staffing input { accent-color: #854d0e; }
+.rescue-summary { font-size: 12px; color: #0f766e; line-height: 1.6; }
+.recommendation-list { display: grid; gap: 8px; font-size: 12px; margin-bottom: 20px; }
+.recommendation-card { display: grid; gap: 6px; padding: 12px; color: #343a35; border: 1px solid #d5d8d0; border-left: 4px solid #eab308; border-radius: 3px; text-decoration: none; line-height: 1.4; }
+.recommendation-card:hover { background: #fff9dc; }
+.recommendation-card span { font-size: 10px; color: #616960; }
+.locate-button, #site-show-map { width: 100%; border: 1px solid #1d4ed8; color: #1d4ed8; background: white; border-radius: 3px; padding: 10px; font-size: 12px; cursor: pointer; }
+.locate-button[aria-pressed='true'] { background: #eff6ff; }
+.walk-result { font-size: 11px; line-height: 1.6; margin: 12px 0 20px; }
+.walk-result a { color: #1d4ed8; font-weight: 650; }
+.walk-result p { margin: 7px 0; }
+.walk-success { color: #0f766e; }
+.walk-warning { color: #a33a20; }
+.choosing-location, .choosing-location .leaflet-interactive { cursor: crosshair !important; }
+.site-page { max-width: 850px; margin: 35px auto 50px; padding: 30px; background: white; border: 1px solid #d5d8d0; border-radius: 5px; }
+.site-page > a { color: #444b45; display: inline-block; margin-bottom: 30px; font-size: 13px; }
+.site-page h1 { font-size: clamp(27px, 4vw, 42px); margin-bottom: 15px; }
+.site-facts { display: grid; grid-template-columns: minmax(180px, 1fr) 1fr; gap: 15px 25px; margin: 30px 0; }
+.site-facts dt { font-size: 12px; color: #68706a; }
+.site-facts dd { font-size: 14px; margin: 0; overflow-wrap: anywhere; }
+#site-show-map { width: auto; margin-top: 20px; }
+.sidebar { max-height: 900px; overflow-y: auto; }
+@media (max-width: 650px) { .sidebar { max-height: none; } .site-page { padding: 22px; } .site-facts { grid-template-columns: 1fr; gap: 8px; } .site-facts dd { margin-bottom: 12px; } }

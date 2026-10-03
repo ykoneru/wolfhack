@@ -41,3 +41,42 @@ Check that a selected tract keeps its outline while its fill follows the hour.
 Site dots remain visible and clickable; their visibility is not time-filtered
 in this step. OpenStreetMap background tiles are the only external map data
 requests.
+
+## Step 10: rescue and walking access
+
+Select None, 1, 3, or 5 under "Keep buildings open". The UI reads the
+precomputed recommendations for that hour from hours.json, highlights those
+sites in yellow, restores covered colors to their nearby tracts, and updates
+the uncovered total. It uses the radius in hours.json and the pipeline's
+haversine centroid rule, counting overlapping populations once. Changing the
+hour or running Play recomputes the scenario for that hour. If fewer than the
+requested number of buildings help, the actual count is shown.
+
+The rescue works from files without starting the API server. Checks compare
+its saved population with the pipeline recommendations for every hour and
+staffing choice. The /recommend API uses the same forced-open semantics;
+no calls to Census, weather, Overpass, or routing services run in the browser.
+
+Click a site dot or recommendation to open /sites/{id}. The page displays
+its name, normal closing time, hours source, selected-hour status, population
+within the coverage radius, and additional uncovered population it could
+cover. Counts for individual buildings can overlap; each recommendation's
+"people added" is its marginal gain after previous picks. The site URL carries
+the hour and staffing choice so refresh and sharing reproduce the scenario.
+"Show on map" returns to the map and focuses on the building. Unknown site
+IDs show a not-found state. A static host must serve index.html for /sites/*
+paths (Vite dev and preview already do so).
+
+Select "I am here" and click the map. The nearest site open at the selected
+hour is named, with straight-line miles, an estimated walk at 3 mph, arrival
+time, and whether it is within the coverage radius and reachable before
+closing. Arriving exactly at closing is too late. Hospitals/24-hour sites
+and buildings kept open in the scenario have no modeled closing deadline.
+The selected point persists when changing hour or staffing, and the result
+updates. This is a distance estimate, not a street route. No GPS permission
+or routing API is used.
+
+At 6 PM, keeping three buildings open restores 16,559 people and reduces
+the current statewide uncovered population from 25,639 to 9,080. The five
+option currently selects four useful buildings. Tests cover these counts,
+overlap, closing equality, hospitals, and the 3-mile walking limit.
