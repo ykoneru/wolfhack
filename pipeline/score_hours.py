@@ -196,11 +196,18 @@ def score_hour(tracts: list[dict], sites: list[dict], nearby: list[list[tuple[in
     return {"uncovered_population": uncovered_population, "tracts": tracts_out}
 
 
-def recommend(tracts: list[dict], sites: list[dict], nearby: list[list[tuple[int, float]]], hour: int, threshold: float) -> list[dict]:
-    closed = [site["id"] for site in sites if not is_open(site, hour)]
+def recommend(
+    tracts: list[dict],
+    sites: list[dict],
+    nearby: list[list[tuple[int, float]]],
+    hour: int,
+    threshold: float,
+    keep_open: set[str] | None = None,
+) -> list[dict]:
+    forced: set[str] = set(keep_open or ())
+    closed = [site["id"] for site in sites if not is_open(site, hour, forced)]
     picked = []
-    forced: set[str] = set()
-    base = score_hour(tracts, sites, nearby, hour, threshold)
+    base = score_hour(tracts, sites, nearby, hour, threshold, forced)
     uncovered = {tract_id for tract_id, row in base["tracts"].items() if row["uncovered"]}
     populations = {props["id"]: props.get("population") or 0 for props in tracts}
     covers: dict[str, list[str]] = {site["id"]: [] for site in sites}
@@ -224,6 +231,32 @@ def recommend(tracts: list[dict], sites: list[dict], nearby: list[list[tuple[int
             uncovered.discard(tract_id)
         picked.append({"site_id": best_id, "people_added": best_people})
     return picked
+
+
+def people_saved(tracts: list[dict], sites: list[dict], nearby: list[list[tuple[int, float]]], hour: int, threshold: float, site_id: str) -> int:
+    before = score_hour(tracts, sites, nearby, hour, threshold)["uncovered_population"]
+    after = score_hour(tracts, sites, nearby, hour, threshold, {site_id})["uncovered_population"]
+    return before - after
+
+
+def check_first_pick() -> None:
+    import random
+
+    tracts, sites, nearby = prepare(load_features(TRACTS_PATH), load_features(SITES_PATH))
+    hour = 18
+    threshold = 0.30
+    picks = recommend(tracts, sites, nearby, hour, threshold)
+    if not picks:
+        raise SystemExit("no rescue building at 6pm")
+    best = picks[0]
+    best_saved = people_saved(tracts, sites, nearby, hour, threshold, best["site_id"])
+    closed = [site["id"] for site in sites if not is_open(site, hour) and site["id"] != best["site_id"]]
+    random.seed(7)
+    sample = random.sample(closed, k=min(12, len(closed)))
+    random_saved = max(people_saved(tracts, sites, nearby, hour, threshold, site_id) for site_id in sample)
+    if best_saved < best["people_added"] or best_saved <= random_saved:
+        raise SystemExit(f"first pick saved {best_saved}, random saved {random_saved}, listed {best['people_added']}")
+    print(f"first pick covers {best_saved} people, more than a random closed site ({random_saved})")
 
 
 def check_sample() -> None:
