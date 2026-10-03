@@ -1,0 +1,56 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -78.64,
+          35.735
+        ]
+      },
+      "properties": {
+        "id": "sample-south-library",
+        "name": "Sample South Raleigh Library",
+        "type": "library",
+        "close_hour": 17,
+        "hours_source": "osm"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -78.58,
+          35.76
+        ]
+      },
+      "properties": {
+        "id": "sample-southeast-center",
+        "name": "Sample Southeast Community Center",
+        "type": "community_centre",
+        "close_hour": 17,
+        "hours_source": "default"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -78.703,
+          35.817
+        ]
+      },
+      "properties": {
+        "id": "sample-rex-hospital",
+        "name": "Sample Rex Hospital",
+        "type": "hospital",
+        "close_hour": null,
+        "hours_source": "nconemap"
+      }
+    }
+  ]
+}
