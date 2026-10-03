@@ -4,35 +4,39 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#cc0000" />
-    <meta name="description" content="Explore five sample neighborhoods in North Carolina's Research Triangle." />
-    <title>Last Door · Triangle map</title>
+    <meta name="description" content="Explore North Carolina census tracts and community sites." />
+    <title>Last Door · North Carolina map</title>
   </head>
   <body>
     <header class="masthead">
       <a class="brand" href="./" aria-label="Last Door home"><span class="brand-icon" aria-hidden="true">↗</span> LAST DOOR<span class="brand-dot">.</span></a>
       <span class="location">NORTH CAROLINA <span aria-hidden="true">/</span> THE TRIANGLE</span>
-      <span class="badge">SAMPLE EXPLORER</span>
+      <span class="badge">NORTH CAROLINA EXPLORER</span>
     </header>
     <main>
       <section class="intro" aria-labelledby="page-title">
         <div><p class="eyebrow">A CLOSER LOOK AT OUR NEIGHBORHOODS</p><h1 id="page-title">Every place has a story.</h1></div>
-        <p class="intro-copy">Start with the places around us.<br />Select a gray area to explore a sample tract.</p>
+        <p class="intro-copy">Start with the places around us.<br />Select a tract or site to explore North Carolina.</p>
       </section>
-      <section class="workspace" aria-label="Triangle sample map explorer">
+      <section class="workspace" aria-label="North Carolina map explorer">
         <aside class="sidebar">
           <div class="panel-heading"><p class="eyebrow">ON THE MAP</p><span class="count" id="tract-count">—</span></div>
-          <h2>Five neighborhoods.<br />One starting point.</h2>
-          <p class="muted">Sample shapes around Raleigh, in the heart of the Research Triangle.</p>
-          <div class="legend"><span class="swatch" aria-hidden="true"></span> Sample tract <span class="legend-note">Unscored</span></div>
-          <div class="tract-list" id="tract-list" aria-label="Choose a sample tract"></div>
+          <h2>Across the state.<br />Close to home.</h2>
+          <p class="muted">Census tracts and community locations across North Carolina.</p>
+          <div class="legend"><span class="swatch" aria-hidden="true"></span> Census tract <span class="legend-note">Unscored</span></div>
+          <div class="legend site-legend"><span class="site-swatch" aria-hidden="true"></span> Community sites <span class="legend-note" id="site-count">—</span></div>
+          <p class="muted">Libraries, community centers, shelters, and hospitals where present in the dataset.</p>
+          <div class="view-controls"><button id="view-state" type="button" disabled>All North Carolina</button><button id="view-triangle" type="button" disabled>The Triangle</button></div>
+          <label class="eyebrow picker-label" for="tract-picker">FIND A TRACT</label>
+          <select id="tract-picker" disabled><option value="">Choose a census tract…</option></select>
           <div class="selection"><p class="eyebrow">SELECTED TRACT</p><p id="selected-name" aria-live="polite">Choose a tract on the map.</p></div>
-          <p class="fixture-note">Illustrative sample boundaries.<br />Not live Census or risk data.</p>
+          <p class="fixture-note">Census tract boundaries · OpenStreetMap &amp; NC OneMap sites.<br />Local files. No risk scores yet.</p>
         </aside>
         <div class="map-column">
           <div class="map-frame">
-            <div id="map" aria-label="Map of sample tracts in the Research Triangle"></div>
-            <div class="map-label"><span class="map-dot" aria-hidden="true"></span> Research Triangle, NC</div>
-            <p class="map-status" id="map-status" role="status">Loading sample tracts…</p>
+            <div id="map" aria-label="Map of North Carolina census tracts and sites"></div>
+            <div class="map-label"><span class="map-dot" aria-hidden="true"></span> North Carolina</div>
+            <p class="map-status" id="map-status" role="status">Loading North Carolina tracts and sites…</p>
           </div>
           <div class="timeline">
             <div class="timeline-heading"><label for="hour">TIME OF DAY</label><output id="hour-value" for="hour">2:00 PM</output><span class="timeline-note" id="hour-note">Preview only · map stays unchanged</span></div>
@@ -41,7 +45,7 @@
           </div>
         </div>
       </section>
-      <footer><span>Built for the places we call home.</span><span>LOCAL SAMPLE DATA <span class="footer-dot">●</span> STEP 02</span></footer>
+      <footer><span>Built for the places we call home.</span><span>LOCAL GEOSPATIAL DATA <span class="footer-dot">●</span> STEP 04</span></footer>
     </main>
     <script type="module" src="/src/main.js"></script>
   </body>

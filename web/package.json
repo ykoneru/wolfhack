@@ -4,6 +4,9 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
+    "sync:data": "node scripts/sync-data.mjs",
+    "predev": "npm run sync:data",
+    "prebuild": "npm run sync:data",
     "dev": "vite --host 127.0.0.1",
     "build": "vite build",
     "preview": "vite preview --host 127.0.0.1"

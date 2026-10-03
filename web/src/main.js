@@ -2,83 +2,124 @@ import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import './style.css'
 
-const map = L.map('map', { zoomControl: false }).setView([35.88, -78.83], 10)
+const triangleBounds = [[35.68, -79.08], [36.08, -78.48]]
+const map = L.map('map', { zoomControl: false, preferCanvas: true }).setView([35.6, -79.8], 7)
 L.control.zoom({ position: 'bottomright' }).addTo(map)
-
+map.createPane('sites')
+map.getPane('sites').style.zIndex = 450
 const status = document.querySelector('#map-status')
-const tiles = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+let tileFailed = false
+let loaded = false
+function showStatus(message) {
+  status.hidden = false
+  status.textContent = message
+}
+L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
   maxZoom: 19,
   attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+}).on('tileerror', () => {
+  tileFailed = true
+  if (loaded) showStatus('Some background tiles could not load. Tracts and sites are still available.')
 }).addTo(map)
-tiles.on('tileerror', () => {
-  status.hidden = false
-  status.textContent = 'Some background tiles could not load. Sample tracts are still available.'
-})
 
 const hour = document.querySelector('#hour')
 hour.addEventListener('input', () => {
   const label = `${Number(hour.value) - 12}:00 PM`
   document.querySelector('#hour-value').value = label
   hour.setAttribute('aria-valuetext', label)
-  // Step 2: the slider only updates its label; no scoring, filtering, or API requests.
+  // Step 4: all shapes and sites remain visible; scoring comes later.
 })
 
-async function loadSample() {
+async function readCollection(name, types) {
+  const response = await fetch(`${import.meta.env.BASE_URL}${name}.geojson`)
+  if (!response.ok) throw new Error(`${name} request returned ${response.status}`)
+  const collection = await response.json()
+  if (collection.type !== 'FeatureCollection' || !collection.features?.length ||
+      collection.features.some(f => !types.includes(f.geometry?.type) || !f.properties?.id || !f.properties?.name)) {
+    throw new Error(`Invalid ${name} collection`)
+  }
+  return collection
+}
+
+function popupTitle(text) {
+  const title = document.createElement('strong')
+  title.textContent = text
+  return title
+}
+
+async function loadMap() {
   try {
-    const response = await fetch(`${import.meta.env.BASE_URL}sample/tracts.geojson`)
-    if (!response.ok) throw new Error(`Sample request returned ${response.status}`)
-    const sample = await response.json()
-    if (sample.type !== 'FeatureCollection' || sample.features?.length !== 5) {
-      throw new Error('Expected the five-tract sample FeatureCollection')
-    }
-    const buttons = new Map()
+    const [tracts, sites] = await Promise.all([
+      readCollection('tracts', ['Polygon', 'MultiPolygon']),
+      readCollection('sites', ['Point']),
+    ])
+    const picker = document.querySelector('#tract-picker')
+    const layers = new Map()
     let selectedLayer
     function select(feature, layer) {
-      if (selectedLayer) selectedLayer.setStyle({ weight: 2, color: '#50565c' })
+      if (selectedLayer) selectedLayer.setStyle({ weight: 0.7, color: '#676c70' })
       selectedLayer = layer
-      layer.setStyle({ weight: 3, color: '#22272b' })
+      layer.setStyle({ weight: 2.5, color: '#22272b' })
       layer.bringToFront()
-      document.querySelector('#selected-name').textContent = feature.properties.name
-      for (const [id, button] of buttons) {
-        button.setAttribute('aria-pressed', String(id === feature.properties.id))
-      }
+      document.querySelector('#selected-name').textContent = `${feature.properties.name} · ${feature.properties.id}`
+      picker.value = feature.properties.id
     }
-    L.geoJSON(sample, {
-      style: { color: '#50565c', weight: 2, fillColor: '#92979c', fillOpacity: 0.65 },
+    const tractLayer = L.geoJSON(tracts, {
+      style: { color: '#676c70', weight: 0.7, fillColor: '#92979c', fillOpacity: 0.38 },
       onEachFeature(feature, layer) {
-        const title = document.createElement('strong')
-        title.textContent = feature.properties.name
-        layer.bindPopup(title)
+        layer.bindPopup(popupTitle(`${feature.properties.name} · ${feature.properties.id}`))
         layer.on('click', () => select(feature, layer))
-        const button = document.createElement('button')
-        button.type = 'button'
-        button.className = 'tract-button'
-        button.textContent = feature.properties.name.replace(/^Sample /, '')
-        button.setAttribute('aria-pressed', 'false')
-        button.addEventListener('click', () => {
-          select(feature, layer)
-          map.fitBounds(layer.getBounds(), { maxZoom: 13, padding: [60, 60] })
-          layer.openPopup()
-        })
-        buttons.set(feature.properties.id, button)
-        document.querySelector('#tract-list').append(button)
+        layers.set(feature.properties.id, { feature, layer })
       },
     }).addTo(map)
-    document.querySelector('#tract-count').textContent = '05'
-    if (status.textContent === 'Loading sample tracts…') status.hidden = true
+    const options = document.createDocumentFragment()
+    for (const feature of [...tracts.features].sort((a, b) => a.properties.name.localeCompare(b.properties.name, 'en', { numeric: true }) || a.properties.id.localeCompare(b.properties.id))) {
+      const option = document.createElement('option')
+      option.value = feature.properties.id
+      option.textContent = `${feature.properties.name} · ${feature.properties.id}`
+      options.append(option)
+    }
+    picker.append(options)
+    picker.disabled = false
+    picker.addEventListener('change', () => {
+      const entry = layers.get(picker.value)
+      if (!entry) return
+      select(entry.feature, entry.layer)
+      map.fitBounds(entry.layer.getBounds(), { maxZoom: 13, padding: [35, 35] })
+      entry.layer.openPopup()
+    })
+    const typeLabels = { library: 'Library', hospital: 'Hospital', community_centre: 'Community center', shelter: 'Shelter' }
+    L.geoJSON(sites, {
+      pane: 'sites',
+      pointToLayer: (_feature, latlng) => L.circleMarker(latlng, {
+        pane: 'sites', radius: 3.5, color: '#fff', weight: 1, fillColor: '#b51f2b', fillOpacity: 0.9,
+      }),
+      onEachFeature(feature, layer) {
+        const content = document.createElement('div')
+        content.append(popupTitle(feature.properties.name))
+        const type = document.createElement('div')
+        type.textContent = typeLabels[feature.properties.type] || feature.properties.type
+        content.append(type)
+        layer.bindPopup(content)
+      },
+    }).addTo(map)
+    document.querySelector('#tract-count').textContent = tracts.features.length.toLocaleString('en-US')
+    document.querySelector('#site-count').textContent = sites.features.length.toLocaleString('en-US')
+    const stateButton = document.querySelector('#view-state')
+    const triangleButton = document.querySelector('#view-triangle')
+    stateButton.disabled = triangleButton.disabled = false
+    stateButton.addEventListener('click', () => map.fitBounds(tractLayer.getBounds(), { padding: [20, 20], animate: false }))
+    triangleButton.addEventListener('click', () => map.fitBounds(triangleBounds, { padding: [20, 20], animate: false }))
+    map.invalidateSize({ pan: false })
+    map.fitBounds(tractLayer.getBounds(), { padding: [20, 20], animate: false })
+    loaded = true
+    status.hidden = !tileFailed
+    if (tileFailed) showStatus('Some background tiles could not load. Tracts and sites are still available.')
   } catch (error) {
-    status.hidden = false
-    status.textContent = 'Could not load the five sample tracts. Refresh the page to try again.'
-    console.error('Sample map:', error)
+    showStatus('Could not load the local tract and site files. Run npm run sync:data, then refresh.')
+    console.error('NC map:', error)
   }
 }
 
-loadSample()
-let initialView = true
-new ResizeObserver(() => {
-  map.invalidateSize({ pan: false })
-  if (initialView) {
-    map.fitBounds([[35.68, -79.08], [36.08, -78.48]], { padding: [25, 25] })
-    initialView = false
-  }
-}).observe(document.querySelector('#map'))
+loadMap()
+new ResizeObserver(() => map.invalidateSize({ pan: false })).observe(document.querySelector('#map'))
