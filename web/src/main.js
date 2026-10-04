@@ -2,6 +2,7 @@ import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 
 import './style.css'
+import { activateTab } from './panel.js'
 import {
   afterAssistantSpoke,
   afterRecognitionEnded,
@@ -32,6 +33,7 @@ const API = 'http://127.0.0.1:8000'
 const WAKE_CENTER = [35.79, -78.65]
 
 const map = L.map('map', { center: WAKE_CENTER, zoom: 10, zoomControl: true })
+new ResizeObserver(() => map.invalidateSize()).observe(document.querySelector('#map'))
 // Standard OSM tiles, darkened in CSS so the basemap sits behind the data
 // instead of competing with it.
 L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -55,10 +57,7 @@ function show(id, visible) {
 }
 
 function frameMap(bounds) {
-  const overlay = window.matchMedia('(min-width: 861px)').matches
-  map.fitBounds(bounds, overlay
-    ? { paddingTopLeft: [24, 24], paddingBottomRight: [408, 24] }
-    : { padding: [24, 24] })
+  map.fitBounds(bounds, { padding: [32, 32] })
 }
 
 function renderLegend() {
@@ -132,6 +131,7 @@ function paintRatioMeter(ratio) {
 
 function renderHome(detail) {
   selectedPin = detail.pin
+  document.querySelector('#home-empty').hidden = true
   text('#home-address', detail.address)
   text(
     '#home-meta',
@@ -247,12 +247,14 @@ function renderTract(detail) {
 }
 
 async function loadTract(tractId) {
+  activateTab('neighborhood')
   const response = await fetch(`${API}/tract?id=${tractId}`)
   if (!response.ok) return
   renderTract(await response.json())
 }
 
 async function selectParcel(pin) {
+  activateTab('home')
   const response = await fetch(`${API}/parcel?pin=${pin}`)
   if (!response.ok) return
   renderHome(await response.json())
