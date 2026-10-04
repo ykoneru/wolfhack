@@ -39,7 +39,7 @@ import {
   neighborhoodSubject,
 } from './tools.js'
 
-const API = 'http://127.0.0.1:8000'
+const API = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000'
 const WAKE_CENTER = [35.79, -78.65]
 
 const map = L.map('map', { center: WAKE_CENTER, zoom: 10, zoomControl: false, attributionControl: true })

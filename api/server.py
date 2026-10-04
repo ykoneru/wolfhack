@@ -37,6 +37,12 @@ from api.fair import cities, discover_homes, hotspots, listings, load_model, par
 from api.limits import LIMITED_MESSAGE, allow_ask, client_ip  # noqa: E402
 
 MODEL: dict = {}
+ALLOWED_ORIGINS = {
+    "https://buyparcel.vip",
+    "https://www.buyparcel.vip",
+    "http://127.0.0.1:5173",
+    "http://localhost:5173",
+}
 
 
 def pin_from(payload: dict) -> str | None:
@@ -62,8 +68,11 @@ class Handler(BaseHTTPRequestHandler):
     def _send(self, status: int, payload: dict | list, extra_headers: dict[str, str] | None = None) -> None:
         body = json.dumps(payload).encode()
         self.send_response(status)
+        origin = self.headers.get("Origin", "")
+        allowed = origin if origin in ALLOWED_ORIGINS else "https://buyparcel.vip"
         self.send_header("Content-Type", "application/json")
-        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Origin", allowed)
+        self.send_header("Vary", "Origin")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
         if extra_headers:
