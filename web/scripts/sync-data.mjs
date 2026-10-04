@@ -1,11 +1,18 @@
 import { readFile } from 'node:fs/promises'
 
-const activity = JSON.parse(await readFile(new URL('../public/activity.json', import.meta.url), 'utf8'))
-const places = JSON.parse(await readFile(new URL('../public/places.json', import.meta.url), 'utf8'))
+const fairness = JSON.parse(await readFile(new URL('../public/fairness.json', import.meta.url), 'utf8'))
 const tracts = JSON.parse(await readFile(new URL('../public/wake-tracts.geojson', import.meta.url), 'utf8'))
-if (!activity.tracts || !activity.demo_place_id) throw new Error('activity.json is not a FlowMap file')
-if (!places.places?.length) throw new Error('places.json is empty')
+
+const county = fairness.county_stats
+if (!county?.median_ratio) throw new Error('fairness.json is missing the county median ratio')
+if (county.bands?.length !== 10) throw new Error('fairness.json is missing the ten price bands')
 if (tracts.type !== 'FeatureCollection' || !tracts.features?.length) throw new Error('wake-tracts.geojson is empty')
-const sample = activity.tracts[tracts.features[0].properties.id]
-if (!sample?.['17']) throw new Error('activity.json is missing the 5pm score')
-console.log(`FlowMap ready: ${tracts.features.length} Wake County tracts, ${places.places.length.toLocaleString('en-US')} places`)
+
+const graded = tracts.features.filter((feature) => feature.properties.enough_sales)
+if (!graded.length) throw new Error('no tract has enough sales to grade')
+if (typeof graded[0].properties.median_ratio !== 'number') throw new Error('a graded tract has no median ratio')
+
+console.log(
+  `Fair Share ready: ${tracts.features.length} Wake County tracts, ${graded.length} graded, ` +
+    `${county.sales.toLocaleString('en-US')} sales from ${county.basis_year}, median ratio ${county.median_ratio}`,
+)

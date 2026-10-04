@@ -1,20 +1,25 @@
-"""FlowMap API. Estimated activity and a best time to go.
+"""Fair Share API. Wake County assessment ratios, by address and by tract.
 
 Run from the repo root:
 
     .venv/bin/python api/server.py
 
-GET /activity?hour=17
-GET /places?search=crabtree
-GET /series?tract_id=37183052505
-POST /recommend
-{"place_id": "...", "earliest": 16, "latest": 21, "minimum_visit_minutes": 45, "hour": 17}
+GET /county
+GET /search?q=johnsdale
+GET /parcel?pin=0794369620
+GET /tract?id=37183052505
+GET /bands
+
+POST /ask
+{"pin": "0794369620", "question": "why is my assessment high?", "history": [{"role": "you", "text": "..."}]}
 
 POST /explain
-POST /speak
-{"text": "Estimated activity is lower at 8:00 PM."}
+{"pin": "0794369620"}
 
-POST /plan writes go:{place id}:{HHMM} on Solana devnet when the wallet is funded.
+POST /speak
+{"text": "This home is assessed above the county norm."}
+
+POST /appeal writes ratio:{pin}:{ratio} on Solana devnet when the wallet is funded.
 """
 
 from __future__ import annotations
@@ -32,17 +37,30 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from api.commit import send_memo, wallet_ready  # noqa: E402
-from api.dispatch import synthesize  # noqa: E402
-from api.flow import driving_route, explain, load_model, recommend, search_places, series  # noqa: E402
-from pipeline.flowmap import HOURS, clock_label  # noqa: E402
+from api.converse import ask  # noqa: E402
+from api.fair import bands, explain, inherit, load_model, parcel, search, tract  # noqa: E402
+from api.speech import synthesize  # noqa: E402
 
 MODEL: dict = {}
+
+
+def pin_from(payload: dict) -> str | None:
+    value = payload.get("pin")
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
 
 
 def load() -> None:
     MODEL.clear()
     MODEL.update(load_model())
-    print(f"loaded {len(MODEL['activity']['tracts'])} tracts and {len(MODEL['places'])} places", flush=True)
+    graded = sum(1 for row in MODEL["tracts"].values() if row.get("enough_sales"))
+    print(
+        f"loaded {len(MODEL['sales'])} sales across {len(MODEL['tracts'])} tracts, "
+        f"{graded} with enough sales to grade",
+        flush=True,
+    )
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -72,35 +90,26 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         query = parse_qs(parsed.query)
         try:
-            if parsed.path == "/activity":
-                hour = int(query.get("hour", ["17"])[0])
-                if hour not in HOURS:
-                    raise ValueError("hour is outside 8am to 10pm")
-                scores = {
-                    tract_id: {"score": block[str(hour)]["score"], "category": block[str(hour)]["category"]}
-                    for tract_id, block in MODEL["activity"]["tracts"].items()
-                }
-                self._send(200, {"hour": hour, "label": clock_label(hour), "scores": scores})
+            if parsed.path == "/county":
+                self._send(200, MODEL["county"])
                 return
-            if parsed.path == "/places":
-                self._send(200, {"places": search_places(MODEL, query.get("search", [""])[0])})
+            if parsed.path == "/search":
+                self._send(200, {"matches": search(MODEL, query.get("q", [""])[0])})
                 return
-            if parsed.path == "/series":
-                self._send(200, series(MODEL, query.get("tract_id", [""])[0]))
+            if parsed.path == "/parcel":
+                self._send(200, parcel(MODEL, query.get("pin", [""])[0]))
                 return
-            if parsed.path == "/plan":
+            if parsed.path == "/tract":
+                self._send(200, tract(MODEL, query.get("id", [""])[0]))
+                return
+            if parsed.path == "/bands":
+                self._send(200, bands(MODEL))
+                return
+            if parsed.path == "/inherit":
+                self._send(200, inherit(MODEL, float(query.get("budget", ["350000"])[0])))
+                return
+            if parsed.path == "/appeal":
                 self._send(200, {"ready": wallet_ready()})
-                return
-            if parsed.path == "/route":
-                self._send(
-                    200,
-                    driving_route(
-                        float(query.get("from_lat", ["0"])[0]),
-                        float(query.get("from_lon", ["0"])[0]),
-                        float(query.get("to_lat", ["0"])[0]),
-                        float(query.get("to_lon", ["0"])[0]),
-                    ),
-                )
                 return
         except KeyError:
             self._send(404, {"error": "not found"})
@@ -112,7 +121,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802
         path = urlparse(self.path).path
-        if path not in {"/recommend", "/explain", "/speak", "/plan"}:
+        if path not in {"/explain", "/speak", "/appeal", "/ask"}:
             self._send(404, {"error": "not found"})
             return
         length = int(self.headers.get("Content-Length", "0"))
@@ -124,12 +133,25 @@ class Handler(BaseHTTPRequestHandler):
                     raise ValueError("text is required")
                 self._send_audio(synthesize(text[:800]))
                 return
-            place_id = str(payload.get("place_id", "")).strip()
-            if not place_id:
-                raise ValueError("place_id is required")
-            if path == "/plan":
-                hour = int(payload.get("hour", 20))
-                memo = f"go:{place_id}:{hour:02d}00"
+            if path == "/ask":
+                # A question about the county alone needs no selected home.
+                history = payload.get("history")
+                self._send(
+                    200,
+                    ask(
+                        MODEL,
+                        pin_from(payload),
+                        str(payload.get("question", "")),
+                        history if isinstance(history, list) else [],
+                    ),
+                )
+                return
+            pin = pin_from(payload)
+            if not pin:
+                raise ValueError("pin is required")
+            if path == "/appeal":
+                detail = parcel(MODEL, pin)
+                memo = f"ratio:{pin}:{detail['ratio']:.3f}"
                 signature = send_memo(memo)
                 self._send(
                     200,
@@ -140,16 +162,9 @@ class Handler(BaseHTTPRequestHandler):
                     },
                 )
                 return
-            earliest = int(payload.get("earliest", 16))
-            latest = int(payload.get("latest", 21))
-            minimum = int(payload.get("minimum_visit_minutes", 45))
-            hour = int(payload.get("hour", 17))
-            if path == "/explain":
-                self._send(200, explain(MODEL, place_id, earliest, latest, minimum, hour))
-                return
-            self._send(200, recommend(MODEL, place_id, earliest, latest, minimum, hour))
+            self._send(200, explain(MODEL, pin))
         except KeyError:
-            self._send(404, {"error": "unknown place"})
+            self._send(404, {"error": "unknown parcel"})
         except (RuntimeError, requests.RequestException) as error:
             self._send(400, {"error": str(error)})
         except (ValueError, json.JSONDecodeError) as error:
@@ -162,7 +177,7 @@ class Handler(BaseHTTPRequestHandler):
 def main() -> None:
     load()
     server = ThreadingHTTPServer(("127.0.0.1", 8000), Handler)
-    print("FlowMap API at http://127.0.0.1:8000/activity, /places, /recommend, /explain, and /series", flush=True)
+    print("Fair Share API at http://127.0.0.1:8000/county, /search, /parcel, /tract, and /bands", flush=True)
     server.serve_forever()
 
 

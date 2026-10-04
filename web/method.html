@@ -3,37 +3,69 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>FlowMap method</title>
+    <title>Fair Share method</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="/src/style.css" />
   </head>
   <body>
     <article class="method">
-      <p><a href="/">← FlowMap</a></p>
-      <h1>How the estimate is made</h1>
-      <p>FlowMap estimates how active a Wake County census tract is likely to be on a typical weekday. It is not a live crowd count and it is not a traffic measurement.</p>
-      <h2>Score</h2>
-      <p>Each hour from 8am to 10pm gets a score from 0 to 100:</p>
+      <p><a href="/">← Fair Share</a></p>
+      <h1>How the ratio study is made</h1>
+      <p>Fair Share runs a sales-ratio study on Wake County single-family homes. A sales ratio is the county's assessed value divided by what the home actually sold for. It is the standard way assessors are checked, and the thresholds here come from the International Association of Assessing Officers <em>Standard on Ratio Studies</em>.</p>
+
+      <h2>Where the numbers come from</h2>
+      <p>Every figure is pulled from a public source. Nothing is modelled or imputed.</p>
       <ul>
-        <li>Population, up to 20 points, from people per square kilometer compared with the 95th percentile in Wake County.</li>
-        <li>Commute, up to 25 points, from American Community Survey table B08302, time leaving home for work.</li>
-        <li>Destinations, up to 30 points, from OpenStreetMap places inside the tract.</li>
-        <li>Connectivity, up to 15 points, from major-road segments and bus stops. This is network connectivity, not traffic.</li>
-        <li>Weather, a small adjustment on parks only, using the stored afternoon forecast from 2pm to 8pm.</li>
+        <li>Assessed values, sale prices, sale dates, year built, heated area, and parcel location come from the Wake County <code>Property/Parcels</code> ArcGIS feature service.</li>
+        <li>Tract boundaries come from Census TIGER/Line.</li>
+        <li>Owner-occupancy, median owner value, and renter cost burden come from American Community Survey tables B25003, B25077, and B25070.</li>
       </ul>
-      <p>Quiet is 0–25, Light is 26–45, Moderate is 46–65, Busy is 66–80, and Very Busy is 81–100.</p>
-      <h2>Time of day</h2>
-      <p>A place does not count the same at every hour. Coffee shops, schools, and universities weigh more in the morning. Restaurants and shopping weigh more at midday and in the early evening. Bars and entertainment weigh more at night. A place contributes nothing in an hour when it is closed.</p>
-      <p>The Census groups 4:00pm to 11:59pm as one departure bin. FlowMap places that share on 4pm, 5pm, and 6pm. It does not treat 7pm to 10pm as a measured commute. The noon-to-4pm bin is split evenly across those hours because the table is not hourly.</p>
-      <h2>Opening hours</h2>
-      <p>When OpenStreetMap includes a simple opening-hours string, that range is used. Otherwise FlowMap uses a weekday default and labels it estimated. Defaults include coffee 7am–7pm, restaurants 11am–10pm, grocery 7am–11pm, gyms 6am–10pm, shopping 10am–9pm, schools 7am–4pm, and parks 6am–9pm. These defaults are not a confirmed schedule.</p>
-      <h2>Route and leave time</h2>
-      <p>The line on the map is a driving route along roads. Leave time is that drive subtracted from the quieter arrival hour. If the road service is unavailable, the line is straight and the minutes assume 25 miles per hour. The before-class planner uses that same 25 mile-per-hour estimate to find a nearby stop you can reach, visit, and return from before the class hour.</p>
-      <h2>Best time to go</h2>
-      <p>The recommendation is the hour in the user’s window with the lowest estimated activity that still leaves the minimum visit, 45 minutes unless changed, before the place closes. The quietest hour is skipped when the visit would not fit.</p>
-      <h2>Weather and air</h2>
-      <p>Parks are reduced 10% at or above 90°F and raised 10% between 65°F and 82°F. Air quality at or above 101 reduces parks another 10%. Hours outside the stored 2pm–8pm forecast are not weather-adjusted. Rain is not in that file, so it is not applied.</p>
+
+      <h2>Which sales count</h2>
+      <p>Wake County reassesses on a four-year cycle and the current values took effect on January 1, 2024. The equity measures therefore use 2024 sales only, so the assessed value and the sale price describe the same moment. Mixing later years would conflate market drift with assessment inequity.</p>
+      <p>A sale is dropped when it is not plausibly arm's length:</p>
+      <ul>
+        <li>Price at or under $50,000, which is usually a family transfer or a partial interest.</li>
+        <li>A ratio below 0.4 or above 2.0, which usually means a bundled deed or a parcel that changed after the sale.</li>
+        <li>A year built at or after the sale year, because a home finished after the assessment date was never assessed as the house that sold.</li>
+      </ul>
+      <p>Address search is limited to the 19,004 single-family sales from 2024, so a home's own ratio and every benchmark it is compared against describe the same moment. Of those, 12,799 survive the arm's-length filters and become the official equity measures.</p>
+
+      <h2>The four measures</h2>
+      <p>Each one answers a different question, and all four are reported whether or not they are flattering.</p>
+      <table>
+        <thead>
+          <tr><th>Measure</th><th>Wake</th><th>Standard</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Median ratio — is the overall level right</td><td>0.951</td><td>0.90 to 1.10</td></tr>
+          <tr><td>Coefficient of dispersion — are similar homes treated alike</td><td>7.6</td><td>15.0 or lower</td></tr>
+          <tr><td>Price-related differential — do cheap and expensive homes differ</td><td>1.016</td><td>0.98 to 1.03</td></tr>
+          <tr><td>Price-related bias — the same question as a regression slope</td><td>-0.030</td><td>-0.05 to 0.05</td></tr>
+        </tbody>
+      </table>
+      <p>The coefficient of dispersion is the average distance from the median ratio, as a percentage of the median. The price-related differential is the plain mean ratio divided by the dollar-weighted mean ratio; above 1.03 is called regressive, meaning cheaper homes carry more assessed value per dollar of market price. Price-related bias is the slope of a regression of ratio deviation on home value, and a verdict of regressive is only reported when both of those agree, so one noisy number cannot decide it.</p>
+
+      <h2>What Wake County actually shows</h2>
+      <p>Wake meets all four thresholds. The assessment level is close to the market, and similar homes are treated consistently.</p>
+      <p>The price bands still show a steady tilt. Sorted into ten equal groups by sale price, the cheapest tenth sits at a median ratio of 0.982 and the priciest tenth at 0.907, and the decline is nearly monotonic in between. In plain terms a $300,000 home is assessed at about 98 percent of what it sold for while a $1,000,000 home is assessed at about 91 percent. The gap is real and visible, and it is also inside the tolerance the profession allows. Both of those statements are true, and the page says both.</p>
+
+      <h2>What the dollar figure means</h2>
+      <p>The difference shown on a home is in assessed dollars, not tax dollars. It is the gap between what the county assessed the home at and what it would have been assessed at under the county's own median ratio. Fair Share does not apply a tax rate, because the rate depends on municipality and special districts and quoting a single bill would be a guess.</p>
+
+      <h2>Tracts</h2>
+      <p>A census tract is shaded only when at least fifteen qualifying 2024 sales fall inside it. 208 of Wake's 230 tracts clear that bar. The rest are drawn faintly and labelled as too few sales rather than coloured as if they had been measured.</p>
+
+      <h2>The spoken assistant</h2>
+      <p>Click Talk and ask out loud. The browser listens until you pause, Gemini answers from the figures assembled for the selected home and the county study, and ElevenLabs reads the reply. It then listens again so a follow-up such as "compared to my neighbors?" still refers to the same house. Stop ends the conversation. The model is instructed not to invent a tax rate, a tax bill, an appeal deadline, or any number that is not in the data block. When that call fails, the same facts are written out directly.</p>
+
+      <h2>If you bought here</h2>
+      <p>A buyer does not get a fresh assessment. They inherit the number already on the roll until the next countywide revaluation, which is 2028. The budget box is not a listing search and not a price forecast. It only answers: among 2024 sales at or under that budget, how heavy a ratio did those buyers step into, and in which tracts was it heaviest.</p>
+
       <h2>What this cannot say</h2>
-      <p>There is no foot-traffic sensor, no live vehicle count, and no wait time. A Gemini reply may only restate these scores. If that call fails, the same facts are written out directly.</p>
+      <p>A high ratio is evidence worth checking, not proof an appeal will succeed. The county's own appraisal may account for condition, renovations, or site features that a sale price and a square footage do not capture. This page cannot see inside a house.</p>
     </article>
   </body>
 </html>

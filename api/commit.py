@@ -15,7 +15,7 @@ from solders.message import Message
 from solders.pubkey import Pubkey
 from solders.transaction import Transaction
 
-from api.explain import load_env
+from api.settings import load_env
 
 ROOT = Path(__file__).resolve().parents[1]
 KEY_PATH = ROOT / "data" / "raw" / "solana-devnet.json"
