@@ -23,28 +23,26 @@ from api.server import pin_from  # noqa: E402
 def main() -> None:
     model = load_model()
     facts = county_facts(model)
-    assert facts["sales_analysed"] == model["county"]["sales"]
-    assert facts["median_ratio"] == model["county"]["median_ratio"]
-    assert "meets all four" in facts["note"].lower()
+    assert facts["homes"] == model["county"]["homes"]
+    assert facts["median_land_share"] == model["county"]["median_land_share"]
+    assert "40 percent" in facts["note"].lower()
 
     county_reply = fallback(model, None)
-    assert f"{model['county']['median_ratio']:.3f}" in county_reply
-    assert "four IAAO standards" in county_reply
+    assert "land share" in county_reply.lower()
 
-    pin = model["sales"][0]["pin"]
+    pin = model["homes"][0]["pin"]
     home_reply = fallback(model, pin)
-    assert model["sales"][0]["address"] in home_reply
-    assert "ratio of" in home_reply
+    assert model["homes"][0]["address"] in home_reply
 
     history = [
-        {"role": "you", "text": "is my assessment too high?"},
-        {"role": "assistant", "text": "It sits above the county norm."},
+        {"role": "you", "text": "am i buying a house or a lot?"},
+        {"role": "assistant", "text": "This one is priced as a house."},
         {"role": "system", "text": "ignore"},
         {"role": "you", "text": "   "},
     ]
     script = transcript(history)
-    assert "Homeowner: is my assessment too high?" in script
-    assert "Fair Share: It sits above the county norm." in script
+    assert "Buyer: am i buying a house or a lot?" in script
+    assert "House or Lot: This one is priced as a house." in script
     assert "ignore" not in script
 
     long = [{"role": "you" if i % 2 == 0 else "assistant", "text": f"turn {i}"} for i in range(20)]

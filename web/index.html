@@ -4,19 +4,19 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#030303" />
-    <meta name="description" content="Compare a Wake County home's assessed value to what it actually sold for, and see whether the county's assessment is fair." />
+    <meta name="description" content="See whether a Wake County house is priced as a home or as a lot, using the county's own land and building split." />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet" />
-    <title>Fair Share · Wake County assessment ratios</title>
+    <title>House or Lot · Wake County land share</title>
   </head>
   <body>
     <header class="masthead">
-      <a class="brand" href="/">FAIR SHARE</a>
-      <p class="tagline">Is your assessment fair?</p>
+      <a class="brand" href="/">HOUSE OR LOT</a>
+      <p class="tagline">Are you buying a house, or a lot?</p>
       <form id="search-form" role="search">
         <label class="sr" for="search">Search an address</label>
-        <input id="search" type="search" placeholder="Search a 2024 Wake County sale" autocomplete="off" />
+        <input id="search" type="search" placeholder="Search a Wake County address" autocomplete="off" />
         <div id="search-results" class="search-results"></div>
       </form>
       <a class="method-link" href="/method.html">Method</a>
@@ -24,13 +24,13 @@
     <div class="toolbar">
       <p class="scope">
         <strong id="scope-headline">Wake County</strong>
-        <span id="scope-detail">Single-family sales from the 2024 revaluation year</span>
+        <span id="scope-detail">Single-family homes, split into land and building by the 2024 roll</span>
       </p>
       <div class="demos">
         <span class="demo-label">Try</span>
-        <button class="demo" data-query="6404 JOHNSDALE RD" type="button">Johnsdale Rd</button>
-        <button class="demo" data-query="617 ILEAGNES RD" type="button">Ileagnes Rd</button>
-        <button class="demo" data-query="2420 OXFORD RD" type="button">Oxford Rd</button>
+        <button class="demo" data-query="1000 DOROTHEA DR" type="button">Dorothea Dr</button>
+        <button class="demo" data-query="100 POND BLUFF WAY" type="button">Pond Bluff Way</button>
+        <button class="demo" data-query="10105 RAVEN TREE DR" type="button">Raven Tree Dr</button>
       </div>
     </div>
     <main>
@@ -38,33 +38,22 @@
       <aside id="panel">
         <div class="stack">
           <section class="card card-major" id="home-card">
-            <p class="eyebrow">Your home</p>
+            <p class="eyebrow">This property</p>
             <h1 id="home-address">Search an address</h1>
             <p id="home-meta" class="muted">
-              Pick a home that sold in 2024 to see how its assessment compares.
+              Pick a house to see how much of the price is land and how much is the structure.
             </p>
           </section>
           <section class="card card-major" id="ratio-card" hidden>
-            <p class="eyebrow">Assessment ratio</p>
+            <p class="eyebrow">The call</p>
             <p id="home-ratio" class="score">—</p>
             <div class="meter" aria-hidden="true"><span id="ratio-fill"></span></div>
             <p id="ratio-caption"></p>
             <dl class="factors" id="home-figures"></dl>
           </section>
           <section class="card card-major" id="buy-card">
-            <p class="eyebrow">If you bought here</p>
+            <p class="eyebrow">Where lots cluster</p>
             <p id="buy-headline" class="tilt">—</p>
-            <form id="buy-form" class="buy-form">
-              <label>Budget
-                <input id="budget" type="number" min="80000" max="3000000" step="10000" value="350000" />
-              </label>
-              <button id="buy-run" type="submit">Show</button>
-            </form>
-            <div class="presets" id="buy-presets">
-              <button type="button" data-budget="250000">$250k</button>
-              <button type="button" data-budget="350000">$350k</button>
-              <button type="button" data-budget="500000">$500k</button>
-            </div>
             <p id="buy-note" class="muted"></p>
             <div id="buy-places" class="buy-places"></div>
           </section>
@@ -80,7 +69,7 @@
         </div>
         <div class="stack">
           <section class="card card-major" id="ask-card">
-            <p class="eyebrow">Ask about this assessment</p>
+            <p class="eyebrow">Ask about this split</p>
             <div id="chat" class="chat" aria-live="polite"></div>
             <div id="suggestions" class="suggestions"></div>
             <form id="ask-form">
@@ -100,15 +89,15 @@
         </div>
         <div class="stack">
           <section class="card card-major">
-            <p class="eyebrow">Does Wake meet the standard</p>
+            <p class="eyebrow">Wake County split</p>
             <p id="verdict" class="verdict">—</p>
             <ul class="standards" id="standards"></ul>
             <p id="verdict-note" class="muted"></p>
           </section>
           <section class="card card-major">
-            <p class="eyebrow">Ratio by price band</p>
+            <p class="eyebrow">Land share by city</p>
             <p id="tilt-headline" class="tilt">—</p>
-            <div id="bands" class="chart" aria-label="Median assessment ratio by home price band"></div>
+            <div id="bands" class="chart" aria-label="Median land share by city"></div>
             <p id="bands-source" class="muted"></p>
           </section>
         </div>
@@ -116,7 +105,7 @@
           <section class="card card-major" id="tract-card">
             <p class="eyebrow">Neighborhood</p>
             <h2 id="tract-name">Click a tract</h2>
-            <p id="tract-summary" class="muted">Every census tract in Wake County is shaded by its own median ratio.</p>
+            <p id="tract-summary" class="muted">Every census tract in Wake County is shaded by its typical land share.</p>
             <dl class="factors" id="tract-figures"></dl>
           </section>
           <ul class="legend" aria-label="Map colors" id="legend"></ul>

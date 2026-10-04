@@ -1,9 +1,8 @@
-"""Download Wake County single-family sales with their assessed values.
+"""Download Wake County single-family parcels with land and building values.
 
-Source: Wake County Property/Parcels FeatureServer. Each record carries the
-county assessed value, the recorded sale price, and the parcel centroid, which
-is what a sales-ratio study needs. Raw pages stay in data/raw so the build can
-run without the network.
+Source: Wake County Property/Parcels FeatureServer. Each record already
+splits the 2024 assessment into land and structure. Raw pages stay in
+data/raw so the build can run without the network.
 """
 
 from __future__ import annotations
@@ -16,20 +15,20 @@ import requests
 
 ROOT = Path(__file__).resolve().parents[1]
 RAW = ROOT / "data" / "raw"
-OUT = RAW / "wake-sales.json"
+OUT = RAW / "wake-homes.json"
 
 SERVICE = "https://maps.wakegov.com/arcgis/rest/services/Property/Parcels/FeatureServer/0/query"
-# Wake County's most recent revaluation took effect January 1, 2024, so sales
-# from 2024 onward are the window that matches the current assessed values.
-SALE_WINDOW_START = "2024-01-01"
 WHERE = (
     "TYPE_USE_DECODE = 'SINGLFAM' "
-    "AND TOTSALPRICE > 50000 "
-    f"AND SALE_DATE >= DATE '{SALE_WINDOW_START}' "
-    "AND TOTAL_VALUE_ASSD > 0"
+    "AND LAND_VAL > 0 "
+    "AND BLDG_VAL > 0 "
+    "AND TOTAL_VALUE_ASSD > 0 "
+    "AND SITE_ADDRESS IS NOT NULL"
 )
 FIELDS = [
     "PIN_NUM",
+    "LAND_VAL",
+    "BLDG_VAL",
     "TOTAL_VALUE_ASSD",
     "TOTSALPRICE",
     "SALE_DATE",
@@ -40,7 +39,7 @@ FIELDS = [
     "PLANNING_JURISDICTION",
 ]
 PAGE = 2000
-USER_AGENT = "fair-share wolfhack (ykoneru@ncsu.edu)"
+USER_AGENT = "house-or-lot wolfhack (ykoneru@ncsu.edu)"
 
 
 def count() -> int:
@@ -97,7 +96,7 @@ def fetch_pin(pin: str) -> dict | None:
 
 
 def search_address(query: str, limit: int = 8) -> list[dict]:
-    """Look up a 2024 single-family sale by street."""
+    """Look up any single-family house by street."""
     text = " ".join(query.strip().upper().split())
     if len(text) < 3:
         return []
@@ -107,10 +106,9 @@ def search_address(query: str, limit: int = 8) -> list[dict]:
         params={
             "where": (
                 "TYPE_USE_DECODE = 'SINGLFAM' "
-                "AND TOTSALPRICE > 50000 "
+                "AND LAND_VAL > 0 "
+                "AND BLDG_VAL > 0 "
                 "AND TOTAL_VALUE_ASSD > 0 "
-                "AND SALE_DATE >= DATE '2024-01-01' "
-                "AND SALE_DATE < DATE '2025-01-01' "
                 f"AND UPPER(SITE_ADDRESS) LIKE '%{safe}%'"
             ),
             "outFields": ",".join(FIELDS),
@@ -136,17 +134,21 @@ def record(feature: dict) -> dict | None:
     attributes = feature.get("attributes") or {}
     centroid = feature.get("centroid") or {}
     pin = attributes.get("PIN_NUM")
+    land = attributes.get("LAND_VAL")
+    building = attributes.get("BLDG_VAL")
     assessed = attributes.get("TOTAL_VALUE_ASSD")
-    price = attributes.get("TOTSALPRICE")
     lon = centroid.get("x")
     lat = centroid.get("y")
-    if not pin or not assessed or not price or lon is None or lat is None:
+    if not pin or not land or not building or not assessed or lon is None or lat is None:
         return None
     sale_ms = attributes.get("SALE_DATE")
+    price = attributes.get("TOTSALPRICE")
     return {
         "pin": str(pin),
+        "land": float(land),
+        "building": float(building),
         "assessed": float(assessed),
-        "price": float(price),
+        "price": float(price) if price else None,
         "sale_ms": int(sale_ms) if sale_ms else None,
         "year_built": attributes.get("YEAR_BUILT"),
         "heated_area": attributes.get("HEATEDAREA"),
@@ -160,7 +162,7 @@ def record(feature: dict) -> dict | None:
 def main() -> None:
     RAW.mkdir(parents=True, exist_ok=True)
     total = count()
-    print(f"Wake single-family sales since {SALE_WINDOW_START}: {total}", flush=True)
+    print(f"Wake single-family homes with a land/building split: {total}", flush=True)
     records: list[dict] = []
     seen: set[str] = set()
     offset = 0
@@ -176,9 +178,9 @@ def main() -> None:
                 records.append(row)
         offset += len(features)
         print(f"  {offset}/{total} fetched, {len(records)} usable", flush=True)
-        time.sleep(0.2)
-    OUT.write_text(json.dumps({"source": SERVICE, "sale_window_start": SALE_WINDOW_START, "sales": records}))
-    print(f"wrote {OUT} with {len(records)} sales", flush=True)
+        time.sleep(0.15)
+    OUT.write_text(json.dumps({"source": SERVICE, "homes": records}))
+    print(f"wrote {OUT} with {len(records)} homes", flush=True)
 
 
 if __name__ == "__main__":

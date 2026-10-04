@@ -1,9 +1,4 @@
-"""A spoken conversation about one assessment, grounded in the ratio study.
-
-Gemini may only use the figures assembled here. It is not allowed to invent a
-tax rate, a bill, a deadline, or legal advice, and it is told to say when a
-question cannot be answered from the data rather than guess at it.
-"""
+"""A spoken conversation about whether a buyer is purchasing a house or a lot."""
 
 from __future__ import annotations
 
@@ -11,7 +6,7 @@ import os
 
 import requests
 
-from api.fair import NEXT_REVALUATION, inherit, parcel
+from api.fair import hotspots, parcel
 from api.settings import MODEL_URL, load_env
 
 HISTORY_TURNS = 6
@@ -19,26 +14,21 @@ MAX_QUESTION = 400
 MAX_TURN = 400
 
 RULES = (
-    "You are the voice of Fair Share, a tool that checks whether Wake County assessed a home fairly. "
+    "You are the voice of House or Lot, a tool that tells a Wake County buyer "
+    "whether more of the county's value is the house or the land. "
     "Your answer is read aloud, so reply in one or two short spoken sentences, "
     "with no bullet points, no markdown, no headings, and no symbols other than dollar signs and percent signs. "
-    "Do not recap facts the homeowner already heard unless they asked again.\n"
+    "Do not recap facts the buyer already heard unless they asked again.\n"
     "Use only the figures in the data block. Never introduce a number that is not there.\n"
-    "Every selected home sold in the 2024 revaluation year, so its sale and the current assessment are from the same moment. "
-    "A sales ratio is the county assessed value divided by the actual sale price. "
-    "A ratio above the county median means the home is assessed more heavily relative to what it sold for.\n"
-    "Never state or estimate a tax rate, a tax bill, a dollar amount of tax owed, or an appeal deadline, "
-    "and never say the homeowner will win an appeal. A high ratio is evidence worth checking, not proof.\n"
-    "If you are asked whether the county is fair, or anything else about the county overall, you must give "
-    "both halves of the finding: that Wake meets all four published standards, and that the median ratio "
-    "still declines steadily from the cheapest homes to the most expensive ones. Never report only one half, "
-    "and do not call the county simply fair or simply unfair.\n"
-    "If asked where a buyer could purchase, or what they would inherit, use the buying block. "
-    "A buyer inherits the current assessed value until the next revaluation year listed there. "
-    "Do not invent listings, mortgage rates, monthly payments, or future sale prices.\n"
+    "Land share is the county land value divided by land plus building. "
+    "At or above 40 percent, the purchase is a lot. "
+    "If it is also built in 1975 or earlier, it is teardown watch.\n"
+    "Never state or estimate a tax rate, a tax bill, a mortgage, a list price, or a rebuild cost.\n"
+    "If asked about the county overall, say the typical land share and that some neighborhoods "
+    "are priced more as land while others are priced more as houses. Neither is good or bad. "
+    "If asked where lots cluster, use the hotspots block.\n"
     "If the question cannot be answered from the data block, say so in one sentence and then state the "
-    "closest fact you do have. If the question is not about this home, this county's assessments, "
-    "buying into an assessment, or how the study works, say that is outside what you can see and offer what you can answer."
+    "closest fact you do have."
 )
 
 
@@ -46,82 +36,54 @@ def county_facts(model: dict) -> dict:
     county = model["county"]
     return {
         "county": "Wake County, North Carolina",
-        "basis_year": county["basis_year"],
-        "revaluation_date": county["revaluation"],
-        "sales_analysed": county["sales"],
-        "median_ratio": county["median_ratio"],
-        "coefficient_of_dispersion": county["cod"],
-        "price_related_differential": county["prd"],
-        "price_related_bias": county["prb"],
-        "uniformity_verdict": county["uniformity"],
-        "regressivity_verdict": county["regressivity"],
-        "iaao_standards": county["standards"],
-        "median_ratio_by_price_band": [
-            {
-                "band": band["band"],
-                "price_range": [band["low_price"], band["high_price"]],
-                "median_ratio": band["median_ratio"],
-                "sales": band["sales"],
-            }
-            for band in county["bands"]
-        ],
+        "homes": county["homes"],
+        "median_land_share": county["median_land_share"],
+        "house_count": county["house_count"],
+        "lot_count": county["lot_count"],
+        "teardown_count": county["teardown_count"],
+        "lot_threshold": county.get("lot_threshold", 0.4),
+        "teardown_year": county.get("teardown_year", 1975),
+        "cities": county.get("cities", [])[:8],
         "note": (
-            "Wake meets all four IAAO standards, and the price bands still decline from the cheapest "
-            "homes to the most expensive ones. Both of those statements are true."
+            "A land share of 40 percent or more means the lot is the larger piece. "
+            "That can be what a land buyer wants. An older house on that kind of lot is teardown watch."
         ),
-        "next_revaluation_year": NEXT_REVALUATION,
     }
 
 
 def home_facts(detail: dict) -> dict:
     tract = detail["tract"]
-    housing = tract.get("housing") or {}
     return {
         "address": detail["address"],
         "city": detail["city"],
-        "sold_for": detail["price"],
-        "assessed_at": detail["assessed"],
-        "sale_date": detail["sale_date"],
-        "sale_year": detail.get("sale_year"),
-        "sale_and_assessment_are_same_year": detail.get("same_moment"),
+        "land_value": detail["land"],
+        "building_value": detail["building"],
+        "land_share": detail["land_share"],
+        "verdict": detail["verdict_label"],
+        "advice": detail["advice"],
         "year_built": detail["year_built"],
         "heated_square_feet": detail["heated_area"],
-        "sales_ratio": detail["ratio"],
-        "assessed_under_county_median_ratio": detail["versus_county"]["implied_assessed"],
-        "dollars_above_county_norm": detail["versus_county"]["difference"],
-        "percent_above_county_norm": detail["versus_county"]["percent"],
-        "own_price_band": detail["band"],
-        "dollars_above_own_price_band": (
-            detail["versus_band"]["difference"] if detail["versus_band"] else None
-        ),
-        "cheapest_band_median_ratio": detail["cheapest_band_ratio"],
+        "last_sale_price": detail.get("price"),
+        "last_sale_date": detail.get("sale_date"),
+        "versus_tract_percent": detail.get("versus_tract"),
         "tract_name": tract["name"],
-        "tract_median_ratio": tract["median_ratio"],
-        "tract_coefficient_of_dispersion": tract.get("cod"),
-        "tract_sales_analysed": tract.get("sales"),
-        "tract_percent_from_county": tract.get("relative_to_county"),
-        "tract_owner_occupied_share": housing.get("owner_share"),
-        "tract_renter_cost_burdened_share": housing.get("renter_burden_share"),
-        "tract_acs_median_owner_value": housing.get("median_home_value"),
+        "tract_median_land_share": tract["median_land_share"],
+        "tract_homes": tract.get("homes"),
+        "tract_lot_count": tract.get("lot_count"),
+        "tract_teardown_count": tract.get("teardown_count"),
     }
 
 
 def build_facts(model: dict, pin: str | None) -> dict:
     facts = {
         "county_study": county_facts(model),
-        "buying": {
-            "meaning": (
-                "A buyer inherits the house's current assessed value until the next "
-                f"countywide revaluation in {NEXT_REVALUATION}. This is not a list of homes for sale."
-            ),
-            "at_350000": inherit(model, 350_000),
-        },
+        "hotspots": hotspots(model),
     }
     if pin:
         facts["selected_home"] = home_facts(parcel(model, pin))
     else:
         facts["selected_home"] = None
-        facts["no_home_note"] = "No home is selected, so answer about the county as a whole or about buying."
+        facts["no_home_note"] = "No home is selected, so answer about the county or about where lots cluster."
     return facts
 
 
@@ -131,7 +93,7 @@ def transcript(history: list[dict]) -> str:
         role = turn.get("role")
         text = turn.get("text")
         if role in {"you", "assistant"} and isinstance(text, str) and text.strip():
-            speaker = "Homeowner" if role == "you" else "Fair Share"
+            speaker = "Buyer" if role == "you" else "House or Lot"
             lines.append(f"{speaker}: {text.strip()[:MAX_TURN]}")
     return "\n".join(lines)
 
@@ -139,23 +101,21 @@ def transcript(history: list[dict]) -> str:
 def fallback(model: dict, pin: str | None) -> str:
     county = model["county"]
     if not pin:
+        share = county["median_land_share"] * 100
         return (
-            f"Wake County's median ratio is {county['median_ratio']:.3f} and it meets all four IAAO standards, "
-            "though cheaper homes still carry a higher ratio than expensive ones."
+            f"Wake County's typical land share is {share:.0f} percent. "
+            f"{county['lot_count']:,} homes are priced as lots and "
+            f"{county['teardown_count']:,} are teardown watch."
         )
     detail = parcel(model, pin)
-    gap = detail["versus_county"]
-    direction = "above" if gap["difference"] > 0 else "below"
+    share = detail["land_share"] * 100
     return (
-        f"{detail['address']} sold for ${detail['price']:,.0f} and is assessed at "
-        f"${detail['assessed']:,.0f}, a ratio of {detail['ratio']:.3f}. That is "
-        f"${abs(gap['difference']):,.0f} {direction} the county norm of "
-        f"{county['median_ratio']:.3f}."
+        f"{detail['address']} is a {detail['verdict_label'].lower()}. "
+        f"Land is {share:.0f} percent of the split. {detail['advice']}"
     )
 
 
 def _turns(history: list[dict], question: str) -> list[dict]:
-    """Gemini's native conversation shape, so a follow-up can refer to the last answer."""
     contents = []
     for turn in history[-HISTORY_TURNS:]:
         role = turn.get("role")

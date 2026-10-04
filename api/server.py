@@ -1,4 +1,4 @@
-"""Fair Share API. Wake County assessment ratios, by address and by tract.
+"""House or Lot API. Wake County land vs building values, by address and tract.
 
 Run from the repo root:
 
@@ -8,18 +8,12 @@ GET /county
 GET /search?q=johnsdale
 GET /parcel?pin=0794369620
 GET /tract?id=37183052505
-GET /bands
+GET /cities
+GET /hotspots
 
 POST /ask
-{"pin": "0794369620", "question": "why is my assessment high?", "history": [{"role": "you", "text": "..."}]}
-
 POST /explain
-{"pin": "0794369620"}
-
 POST /speak
-{"text": "This home is assessed above the county norm."}
-
-POST /appeal writes ratio:{pin}:{ratio} on Solana devnet when the wallet is funded.
 """
 
 from __future__ import annotations
@@ -38,7 +32,7 @@ if str(ROOT) not in sys.path:
 
 from api.commit import send_memo, wallet_ready  # noqa: E402
 from api.converse import ask  # noqa: E402
-from api.fair import bands, explain, inherit, load_model, parcel, search, tract  # noqa: E402
+from api.fair import cities, explain, hotspots, load_model, parcel, search, tract  # noqa: E402
 from api.speech import synthesize  # noqa: E402
 
 MODEL: dict = {}
@@ -55,10 +49,10 @@ def pin_from(payload: dict) -> str | None:
 def load() -> None:
     MODEL.clear()
     MODEL.update(load_model())
-    graded = sum(1 for row in MODEL["tracts"].values() if row.get("enough_sales"))
+    graded = sum(1 for row in MODEL["tracts"].values() if row.get("enough_homes"))
     print(
-        f"loaded {len(MODEL['sales'])} sales across {len(MODEL['tracts'])} tracts, "
-        f"{graded} with enough sales to grade",
+        f"loaded {len(MODEL['homes'])} homes across {len(MODEL['tracts'])} tracts, "
+        f"{graded} with enough homes to grade",
         flush=True,
     )
 
@@ -102,11 +96,11 @@ class Handler(BaseHTTPRequestHandler):
             if parsed.path == "/tract":
                 self._send(200, tract(MODEL, query.get("id", [""])[0]))
                 return
-            if parsed.path == "/bands":
-                self._send(200, bands(MODEL))
+            if parsed.path == "/cities":
+                self._send(200, cities(MODEL))
                 return
-            if parsed.path == "/inherit":
-                self._send(200, inherit(MODEL, float(query.get("budget", ["350000"])[0])))
+            if parsed.path == "/hotspots":
+                self._send(200, hotspots(MODEL))
                 return
             if parsed.path == "/appeal":
                 self._send(200, {"ready": wallet_ready()})
@@ -134,7 +128,6 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_audio(synthesize(text[:800]))
                 return
             if path == "/ask":
-                # A question about the county alone needs no selected home.
                 history = payload.get("history")
                 self._send(
                     200,
@@ -151,7 +144,7 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError("pin is required")
             if path == "/appeal":
                 detail = parcel(MODEL, pin)
-                memo = f"ratio:{pin}:{detail['ratio']:.3f}"
+                memo = f"lot:{pin}:{detail['land_share']:.3f}"
                 signature = send_memo(memo)
                 self._send(
                     200,
@@ -177,7 +170,7 @@ class Handler(BaseHTTPRequestHandler):
 def main() -> None:
     load()
     server = ThreadingHTTPServer(("127.0.0.1", 8000), Handler)
-    print("Fair Share API at http://127.0.0.1:8000/county, /search, /parcel, /tract, and /bands", flush=True)
+    print("House or Lot API at http://127.0.0.1:8000/county, /search, /parcel, /tract", flush=True)
     server.serve_forever()
 
 

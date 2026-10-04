@@ -21,15 +21,15 @@ export function normalizeQuestion(question) {
 export function suggestedQuestions(home) {
   if (!home) {
     return [
-      'Is Wake County assessing homes fairly?',
-      'If I buy a $350,000 house, what assessment do I inherit?',
-      'What does the price band chart show?',
+      'What is Wake County’s typical land share?',
+      'Where is the typical purchase more land?',
+      'What does teardown watch mean?',
     ]
   }
   return [
-    'Is my assessment too high?',
-    'How do I compare to my neighborhood?',
-    'Should I appeal?',
+    'Am I buying a house or a lot?',
+    'How does this compare to my neighborhood?',
+    'Would a remodel pay off here?',
   ]
 }
 

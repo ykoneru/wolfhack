@@ -1,48 +1,45 @@
-"""Lookups and explanations for Fair Share. Numbers come from fairness.json."""
+"""Lookups for House or Lot. Numbers come from land.json."""
 
 from __future__ import annotations
 
 import json
 import os
-from datetime import datetime, timezone
 from pathlib import Path
 
 import requests
 from shapely.geometry import Point, shape
 
-from api.settings import MODEL_URL, database_url, load_env
-from pipeline.build_fairness import CITY_NAMES, sale_date, sale_year
-from pipeline.fairness import assessment_gap, median, ratio
-from pipeline.fetch_parcels import fetch_pin
-
-# Wake reassesses every four years. The current roll took effect 1 Jan 2024,
-# so a buyer inherits today's assessed value until the next countywide pass.
-NEXT_REVALUATION = 2028
-MIN_INHERIT_SALES = 8
+from api.settings import MODEL_URL, load_env
+from pipeline.build_land import CITY_NAMES, sale_date, sale_year
+from pipeline.land import (
+    LOT_SHARE,
+    TEARDOWN_YEAR,
+    advice,
+    classify,
+    land_share,
+    median,
+    verdict_label,
+)
+from pipeline.fetch_parcels import fetch_pin, search_address
 
 ROOT = Path(__file__).resolve().parents[1]
-FAIRNESS_PATH = ROOT / "data" / "fairness.json"
-SALES_PATH = ROOT / "data" / "sales.json"
-MAX_SALES_PER_TRACT = 400
+LAND_PATH = ROOT / "data" / "land.json"
+HOMES_PATH = ROOT / "data" / "homes.json"
+MAX_HOMES_PER_TRACT = 400
 
 
 def load_model() -> dict:
-    fairness = json.loads(FAIRNESS_PATH.read_text())
-    basis_year = fairness["county_stats"]["basis_year"]
-    sales = [
-        sale
-        for sale in json.loads(SALES_PATH.read_text())["sales"]
-        if sale.get("sale_year") == basis_year
-    ]
+    land = json.loads(LAND_PATH.read_text())
+    homes = json.loads(HOMES_PATH.read_text())["homes"]
     by_pin = {}
     by_tract: dict[str, list[dict]] = {}
-    for sale in sales:
-        by_pin[sale["pin"]] = sale
-        by_tract.setdefault(sale["tract_id"], []).append(sale)
+    for home in homes:
+        by_pin[home["pin"]] = home
+        by_tract.setdefault(home["tract_id"], []).append(home)
     return {
-        "county": fairness["county_stats"],
-        "tracts": fairness["tracts"],
-        "sales": sales,
+        "county": land["county_stats"],
+        "tracts": land["tracts"],
+        "homes": homes,
         "by_pin": by_pin,
         "by_tract": by_tract,
         "shapes": _shapes(),
@@ -68,19 +65,25 @@ def locate_tract(model: dict, lat: float, lon: float) -> str | None:
 def hydrate(model: dict, raw: dict) -> dict:
     city = (raw.get("city") or "").strip().upper()
     year = raw.get("sale_year") or sale_year(raw.get("sale_ms"))
+    share = raw.get("land_share")
+    if share is None:
+        share = land_share(raw["land"], raw["building"])
+    kind = raw.get("verdict") or classify(share, raw.get("year_built"))
     tract_id = raw.get("tract_id") or locate_tract(model, raw["lat"], raw["lon"]) or ""
-    sale = {
+    home = {
         **raw,
         "city": CITY_NAMES.get(city, city),
         "sale_year": year,
         "sale_date": raw.get("sale_date") or sale_date(raw.get("sale_ms")),
         "tract_id": tract_id,
+        "land_share": share,
+        "verdict": kind,
     }
-    if sale["pin"] not in model["by_pin"]:
-        model["by_pin"][sale["pin"]] = sale
+    if home["pin"] not in model["by_pin"]:
+        model["by_pin"][home["pin"]] = home
         if tract_id:
-            model["by_tract"].setdefault(tract_id, []).append(sale)
-    return sale
+            model["by_tract"].setdefault(tract_id, []).append(home)
+    return home
 
 
 def search(model: dict, query: str, limit: int = 8) -> list[dict]:
@@ -89,161 +92,128 @@ def search(model: dict, query: str, limit: int = 8) -> list[dict]:
         return []
     found = []
     seen: set[str] = set()
-    for sale in model["sales"]:
-        label = f"{sale['address']} {sale['city']}".lower()
+    for home in model["homes"]:
+        label = f"{home['address']} {home['city']}".lower()
         if text in label:
-            seen.add(sale["pin"])
-            found.append({
-                "pin": sale["pin"],
-                "address": sale["address"],
-                "city": sale["city"],
-                "sale_date": sale["sale_date"],
-            })
+            seen.add(home["pin"])
+            found.append(_match(home))
         if len(found) >= limit:
             return found
+    try:
+        remote = search_address(query, limit)
+    except requests.RequestException as error:
+        print(f"parcel search unavailable: {error}", flush=True)
+        return found
+    for raw in remote:
+        if raw["pin"] in seen:
+            continue
+        home = hydrate(model, raw)
+        found.append(_match(home))
+        if len(found) >= limit:
+            break
     return found
 
 
-def _band_for(county: dict, price: float) -> dict | None:
-    for band in county["bands"]:
-        if band["low_price"] <= price <= band["high_price"]:
-            return band
-    return None
+def _match(home: dict) -> dict:
+    return {
+        "pin": home["pin"],
+        "address": home["address"],
+        "city": home["city"],
+        "verdict": home.get("verdict"),
+        "year_built": home.get("year_built"),
+    }
 
 
 def parcel(model: dict, pin: str) -> dict:
-    sale = model["by_pin"].get(pin)
-    if sale is None:
+    home = model["by_pin"].get(pin)
+    if home is None:
         raw = fetch_pin(pin)
         if raw is None:
             raise KeyError(pin)
-        year = raw.get("sale_year") or sale_year(raw.get("sale_ms"))
-        if year != model["county"]["basis_year"]:
-            raise KeyError(pin)
-        sale = hydrate(model, raw)
+        home = hydrate(model, raw)
     county = model["county"]
-    tract = model["tracts"].get(sale.get("tract_id"), {
-        "id": sale.get("tract_id"),
+    tract = model["tracts"].get(home.get("tract_id"), {
+        "id": home.get("tract_id"),
         "name": "Unknown tract",
-        "median_ratio": None,
-        "cod": None,
-        "sales": 0,
+        "median_land_share": None,
+        "homes": 0,
         "relative_to_county": None,
-        "enough_sales": False,
+        "enough_homes": False,
         "housing": {},
     })
-    own_ratio = ratio(sale["assessed"], sale["price"])
-    same_moment = sale.get("sale_year") == county["basis_year"]
-
-    # What the home would be assessed at if it carried the ratio the county as
-    # a whole carries, and the ratio its own price band carries.
-    versus_county = assessment_gap(sale["assessed"], sale["price"], county["median_ratio"])
-    band = _band_for(county, sale["price"])
-    versus_band = (
-        assessment_gap(sale["assessed"], sale["price"], band["median_ratio"]) if band else None
-    )
-    cheapest = county["bands"][0]["median_ratio"]
-    tilt = assessment_gap(sale["assessed"], sale["price"], cheapest)
-
+    share = home.get("land_share") or land_share(home["land"], home["building"])
+    kind = home.get("verdict") or classify(share, home.get("year_built"))
+    versus = None
+    if tract.get("median_land_share"):
+        versus = round(100.0 * (share / tract["median_land_share"] - 1.0), 1)
     return {
-        "pin": sale["pin"],
-        "address": sale["address"],
-        "city": sale["city"],
-        "lat": sale["lat"],
-        "lon": sale["lon"],
-        "assessed": sale["assessed"],
-        "price": sale["price"],
-        "sale_date": sale["sale_date"],
-        "sale_year": sale.get("sale_year"),
-        "same_moment": same_moment,
-        "year_built": sale["year_built"],
-        "heated_area": sale["heated_area"],
-        "ratio": round(own_ratio, 4),
-        "versus_county": versus_county,
-        "versus_band": versus_band,
-        "band": band,
-        "cheapest_band_ratio": cheapest,
-        "tilt": tilt,
+        "pin": home["pin"],
+        "address": home["address"],
+        "city": home["city"],
+        "lat": home["lat"],
+        "lon": home["lon"],
+        "land": home["land"],
+        "building": home["building"],
+        "assessed": home["assessed"],
+        "price": home.get("price"),
+        "sale_date": home.get("sale_date"),
+        "sale_year": home.get("sale_year"),
+        "year_built": home.get("year_built"),
+        "heated_area": home.get("heated_area"),
+        "land_share": round(share, 4),
+        "verdict": kind,
+        "verdict_label": verdict_label(kind),
+        "advice": advice(kind),
+        "versus_tract": versus,
         "tract": {
-            "id": tract["id"],
-            "name": tract["name"],
-            "median_ratio": tract.get("median_ratio"),
-            "cod": tract.get("cod"),
-            "sales": tract.get("sales"),
+            "id": tract.get("id"),
+            "name": tract.get("name"),
+            "median_land_share": tract.get("median_land_share"),
+            "homes": tract.get("homes"),
             "relative_to_county": tract.get("relative_to_county"),
-            "enough_sales": tract.get("enough_sales", False),
+            "enough_homes": tract.get("enough_homes", False),
+            "house_count": tract.get("house_count"),
+            "lot_count": tract.get("lot_count"),
+            "teardown_count": tract.get("teardown_count"),
             "housing": tract.get("housing", {}),
         },
         "county": {
-            "median_ratio": county["median_ratio"],
-            "cod": county["cod"],
-            "prd": county["prd"],
-            "prb": county["prb"],
-            "uniformity": county["uniformity"],
-            "regressivity": county["regressivity"],
-            "basis_year": county["basis_year"],
-            "sales": county["sales"],
+            "median_land_share": county["median_land_share"],
+            "homes": county["homes"],
+            "house_count": county["house_count"],
+            "lot_count": county["lot_count"],
+            "teardown_count": county["teardown_count"],
+            "lot_threshold": county.get("lot_threshold", LOT_SHARE),
+            "teardown_year": county.get("teardown_year", TEARDOWN_YEAR),
         },
     }
 
 
-def inherit(model: dict, budget: float) -> dict:
-    """What a buyer at this budget would have stepped into in 2024.
-
-    This is not a listing search and it is not a price forecast. It is the
-    assessment a purchaser inherits until the next revaluation, measured on
-    the sales that actually closed at or under the budget.
-    """
-    try:
-        ceiling = float(budget)
-    except (TypeError, ValueError) as error:
-        raise ValueError("budget must be a number") from error
-    if ceiling < 50_000:
-        raise ValueError("budget must be at least 50000")
-
-    county = model["county"]
-    basis = model["county"]["basis_year"]
-    matched = [
-        sale for sale in model["sales"]
-        if sale["price"] <= ceiling and sale.get("sale_year") == basis
-    ]
-    ratios = [ratio(sale["assessed"], sale["price"]) for sale in matched]
-    typical = median(ratios) if ratios else None
-
-    by_tract: dict[str, list[dict]] = {}
-    for sale in matched:
-        by_tract.setdefault(sale["tract_id"], []).append(sale)
-
-    neighborhoods = []
-    for tract_id, sales in by_tract.items():
-        if len(sales) < MIN_INHERIT_SALES:
+def hotspots(model: dict, limit: int = 6) -> dict:
+    """Tracts where the lot, not the house, is the typical purchase."""
+    rows = []
+    for row in model["tracts"].values():
+        if not row.get("enough_homes"):
             continue
-        row = model["tracts"].get(tract_id, {})
-        tract_ratios = [ratio(sale["assessed"], sale["price"]) for sale in sales]
-        tract_ratio = median(tract_ratios)
-        neighborhoods.append({
-            "id": tract_id,
-            "name": row.get("name", tract_id),
-            "sales": len(sales),
-            "median_ratio": round(tract_ratio, 4),
-            "median_price": round(median([sale["price"] for sale in sales])),
-            "relative_to_county": (
-                round(100.0 * (tract_ratio / county["median_ratio"] - 1.0), 1)
-                if county["median_ratio"]
-                else None
-            ),
+        rows.append({
+            "id": row["id"],
+            "name": row["name"],
+            "homes": row["homes"],
+            "median_land_share": row["median_land_share"],
+            "lot_count": row.get("lot_count", 0),
+            "teardown_count": row.get("teardown_count", 0),
+            "relative_to_county": row.get("relative_to_county"),
         })
-    neighborhoods.sort(key=lambda item: (-item["median_ratio"], -item["sales"]))
-
+    rows.sort(key=lambda item: (-item["median_land_share"], -item["teardown_count"]))
+    county = model["county"]
     return {
-        "budget": ceiling,
-        "next_revaluation": NEXT_REVALUATION,
-        "sales": len(matched),
-        "median_ratio": round(typical, 4) if typical is not None else None,
-        "county_median_ratio": county["median_ratio"],
-        "heavier_than_county": bool(typical is not None and typical > county["median_ratio"]),
-        "neighborhoods": neighborhoods[:6],
-        "neighborhoods_total": len(neighborhoods),
+        "meaning": (
+            "These neighborhoods have the highest typical land share. "
+            "That is useful if you want land, and useful if you want to know you are not mainly buying a house."
+        ),
+        "county_median_land_share": county["median_land_share"],
+        "neighborhoods": rows[:limit],
+        "neighborhoods_total": len(rows),
     }
 
 
@@ -251,62 +221,27 @@ def tract(model: dict, tract_id: str) -> dict:
     row = model["tracts"].get(tract_id)
     if row is None:
         raise KeyError(tract_id)
-    sales = model["by_tract"].get(tract_id, [])
+    homes = model["by_tract"].get(tract_id, [])
+    ranked = sorted(homes, key=lambda home: (0 if home["verdict"] != "house" else 1, -home["land_share"]))
     points = [
         {
-            "pin": sale["pin"],
-            "address": sale["address"],
-            "lat": sale["lat"],
-            "lon": sale["lon"],
-            "ratio": round(ratio(sale["assessed"], sale["price"]), 4),
-            "price": sale["price"],
-            "sale_date": sale["sale_date"],
+            "pin": home["pin"],
+            "address": home["address"],
+            "lat": home["lat"],
+            "lon": home["lon"],
+            "land_share": round(home["land_share"], 4),
+            "verdict": home["verdict"],
+            "year_built": home.get("year_built"),
         }
-        for sale in sales[:MAX_SALES_PER_TRACT]
+        for home in ranked[:MAX_HOMES_PER_TRACT]
     ]
     return {
         **row,
         "points": points,
         "points_shown": len(points),
-        "points_total": len(sales),
-        "county_median_ratio": model["county"]["median_ratio"],
+        "points_total": len(homes),
+        "county_median_land_share": model["county"]["median_land_share"],
     }
-
-
-def _facts(detail: dict) -> dict:
-    county = detail["county"]
-    gap = detail["versus_county"]
-    return {
-        "address": detail["address"],
-        "sale_price": detail["price"],
-        "assessed_value": detail["assessed"],
-        "sale_date": detail["sale_date"],
-        "this_home_ratio": detail["ratio"],
-        "county_median_ratio": county["median_ratio"],
-        "county_basis_year": county["basis_year"],
-        "county_sales_analysed": county["sales"],
-        "county_uniformity": county["uniformity"],
-        "county_regressivity_verdict": county["regressivity"],
-        "county_cod": county["cod"],
-        "assessed_dollars_above_county_typical": gap["difference"],
-        "percent_above_county_typical": gap["percent"],
-        "price_band_median_ratio": detail["band"]["median_ratio"] if detail["band"] else None,
-        "cheapest_band_median_ratio": detail["cheapest_band_ratio"],
-        "tract_name": detail["tract"]["name"],
-        "tract_median_ratio": detail["tract"]["median_ratio"],
-        "tract_sales_analysed": detail["tract"]["sales"],
-    }
-
-
-def _fallback(detail: dict) -> str:
-    gap = detail["versus_county"]
-    direction = "above" if gap["difference"] > 0 else "below"
-    return (
-        f"This home sold for ${detail['price']:,.0f} and is assessed at ${detail['assessed']:,.0f}, "
-        f"a ratio of {detail['ratio']:.3f}. The typical Wake County ratio is "
-        f"{detail['county']['median_ratio']:.3f}, so the assessment sits "
-        f"${abs(gap['difference']):,.0f} {direction} the county norm."
-    )
 
 
 def explain(model: dict, pin: str) -> dict:
@@ -317,17 +252,11 @@ def explain(model: dict, pin: str) -> dict:
     if not api_key:
         return {"reply": fallback, "source": "fallback", "parcel": detail}
     prompt = (
-        "You are explaining a property tax assessment ratio to the homeowner in two short spoken sentences. "
-        "Use only the facts below and do not invent a tax rate, a tax bill, a dollar amount of tax owed, "
-        "an appeal deadline, or any figure not listed. "
-        "A sales ratio is the county assessed value divided by the actual sale price. "
-        "A ratio above the county median means this home is assessed more heavily relative to what it sold for. "
-        "Say plainly whether this home is assessed above or below the county norm, and state the difference "
-        "as a dollar amount of assessed value without repeating the words 'assessed dollars'. "
-        "If the cheapest price band has a higher median ratio than this home's own price band, mention that "
-        "lower priced homes in Wake County carry a higher ratio. "
-        "Do not tell the homeowner they will win an appeal.\n"
-        f"Facts: {_facts(detail)}"
+        "You are explaining whether a buyer is purchasing a house or a lot. "
+        "Use two short spoken sentences and only the facts below. "
+        "Do not invent a tax rate, a list price, or a rebuild cost. "
+        "Say the verdict, the land share, and what that means for a remodel or a teardown.\n"
+        f"Facts: { _facts(detail) }"
     )
     try:
         response = requests.post(
@@ -346,54 +275,39 @@ def explain(model: dict, pin: str) -> dict:
     return {"reply": reply, "source": "gemini", "parcel": detail}
 
 
-def bands(model: dict) -> dict:
-    """The price-band ratios, stored in Tiger when it is reachable."""
+def cities(model: dict) -> dict:
     county = model["county"]
-    rows = list(county["bands"])
-    url = database_url()
-    if not url:
-        return {"source": "fairness.json", "bands": rows, "basis_year": county["basis_year"]}
-    try:
-        _store(url, county["basis_year"], rows)
-    except Exception as error:
-        message = str(error).replace(url, "TIGER_DATABASE_URL")
-        print(f"tiger unavailable, using fairness.json: {message}", flush=True)
-        return {"source": "fairness.json", "bands": rows, "basis_year": county["basis_year"]}
-    return {"source": "tiger", "bands": rows, "basis_year": county["basis_year"]}
+    return {
+        "source": "land.json",
+        "cities": county.get("cities", []),
+        "median_land_share": county["median_land_share"],
+    }
 
 
-def _store(url: str, basis_year: int, rows: list[dict]) -> None:
-    import psycopg
+def _facts(detail: dict) -> dict:
+    return {
+        "address": detail["address"],
+        "land_value": detail["land"],
+        "building_value": detail["building"],
+        "land_share": detail["land_share"],
+        "verdict": detail["verdict_label"],
+        "year_built": detail["year_built"],
+        "advice": detail["advice"],
+        "tract_name": detail["tract"]["name"],
+        "tract_median_land_share": detail["tract"]["median_land_share"],
+        "county_median_land_share": detail["county"]["median_land_share"],
+    }
 
-    observed_at = datetime(basis_year, 1, 1, tzinfo=timezone.utc)
-    with psycopg.connect(url, connect_timeout=8, autocommit=True) as connection:
-        connection.execute(
-            """
-            CREATE TABLE IF NOT EXISTS ratio_band (
-                band smallint NOT NULL,
-                observed_at timestamptz NOT NULL,
-                low_price double precision NOT NULL,
-                high_price double precision NOT NULL,
-                median_ratio double precision NOT NULL,
-                sales integer NOT NULL,
-                PRIMARY KEY (band, observed_at)
-            )
-            """
-        )
-        for row in rows:
-            connection.execute(
-                """
-                INSERT INTO ratio_band (band, observed_at, low_price, high_price, median_ratio, sales)
-                VALUES (%s, %s, %s, %s, %s, %s)
-                ON CONFLICT (band, observed_at)
-                DO UPDATE SET median_ratio = EXCLUDED.median_ratio, sales = EXCLUDED.sales
-                """,
-                (
-                    row["band"],
-                    observed_at,
-                    row["low_price"],
-                    row["high_price"],
-                    row["median_ratio"],
-                    row["sales"],
-                ),
-            )
+
+def _fallback(detail: dict) -> str:
+    share = f"{detail['land_share'] * 100:.0f}"
+    return (
+        f"{detail['address']} is a {detail['verdict_label'].lower()}. "
+        f"Land is {share} percent of the county split, "
+        f"{advice(detail['verdict'])}"
+    )
+
+
+# Older server imports still name this inherit.
+def inherit(model: dict, budget: float | None = None) -> dict:
+    return hotspots(model)

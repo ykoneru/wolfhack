@@ -15,25 +15,22 @@ import {
 import {
   NO_DATA_COLOR,
   SCALE,
+  VERDICT_COLOR,
   barHeights,
   dollars,
-  gapSentence,
-  inheritSentence,
+  hotspotSentence,
   percentText,
-  ratioText,
   saleDateText,
-  standardRow,
-  tiltSummary,
+  shareText,
   tractColor,
   tractLabel,
-} from './fairness.js'
+  verdictSentence,
+} from './split.js'
 
 const API = 'http://127.0.0.1:8000'
 const WAKE_CENTER = [35.79, -78.65]
 
 const map = L.map('map', { center: WAKE_CENTER, zoom: 10, zoomControl: true })
-// Standard OSM tiles, darkened in CSS so the basemap sits behind the data
-// instead of competing with it.
 L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
   attribution: '&copy; OpenStreetMap',
   maxZoom: 19,
@@ -65,128 +62,100 @@ function renderLegend() {
   const items = SCALE.map(
     (step) => `<li><span class="swatch" style="background:${step.color}"></span> ${step.label}</li>`,
   )
-  items.push(`<li><span class="swatch" style="background:${NO_DATA_COLOR}"></span> Too few sales</li>`)
+  items.push(`<li><span class="swatch" style="background:${NO_DATA_COLOR}"></span> Too few homes</li>`)
   document.querySelector('#legend').innerHTML = items.join('')
 }
 
-function renderStandards() {
-  const limits = county.standards
+function renderCounty() {
   const rows = [
-    standardRow('Median ratio', county.median_ratio, limits.median_ratio, ratioText),
-    standardRow('Uniformity (COD)', county.cod, [0, limits.cod_max], (value) => value.toFixed(1)),
-    standardRow('Price-related differential', county.prd, limits.prd, ratioText),
-    standardRow('Price-related bias', county.prb, limits.prb, (value) => value.toFixed(3)),
+    ['Typical land share', shareText(county.median_land_share)],
+    ['Priced as a house', county.house_count.toLocaleString('en-US')],
+    ['Priced as a lot', county.lot_count.toLocaleString('en-US')],
+    ['Teardown watch', county.teardown_count.toLocaleString('en-US')],
   ]
   document.querySelector('#standards').innerHTML = rows
     .map(
-      (row) => `<li class="${row.passes ? 'passes' : 'fails'}">
-        <span class="standard-name">${row.name}</span>
-        <strong class="standard-value">${row.value}</strong>
-        <span class="standard-range">standard ${row.range}</span>
-        <span class="standard-mark">${row.passes ? 'meets' : 'misses'}</span>
+      ([name, value]) => `<li>
+        <span class="standard-name">${name}</span>
+        <strong class="standard-value">${value}</strong>
       </li>`,
     )
     .join('')
-
-  const passes = rows.filter((row) => row.passes).length
-  text('#verdict', passes === rows.length ? 'Meets all four' : `Misses ${rows.length - passes} of four`)
-  document.querySelector('#verdict').dataset.state = passes === rows.length ? 'pass' : 'fail'
+  text('#verdict', `${shareText(county.median_land_share)} land`)
+  document.querySelector('#verdict').dataset.state = 'house'
   text(
     '#verdict-note',
-    `Measured on ${county.sales.toLocaleString('en-US')} arm's-length single-family sales from ${county.basis_year}, the year the current assessments took effect. Thresholds are the IAAO Standard on Ratio Studies.`,
+    `Measured on ${county.homes.toLocaleString('en-US')} single-family homes. Land share is land divided by land plus building. At 40% or more, the purchase is a lot.`,
   )
 }
 
-function renderBands(payload) {
-  const bars = barHeights(payload.bands)
+function renderCities(payload) {
+  const top = (payload.cities || []).slice(0, 10)
+  const bars = barHeights(top)
   document.querySelector('#bands').innerHTML = bars
     .map(
-      (bar) => `<div class="bar" style="height:${bar.height}%" data-band="${bar.band}"
-        title="${dollars(bar.low_price)} to ${dollars(bar.high_price)} · ratio ${ratioText(bar.median_ratio)}">
-        <span>${bar.band === 1 || bar.band === bars.length ? ratioText(bar.median_ratio) : ''}</span>
+      (bar) => `<div class="bar" style="height:${bar.height}%"
+        title="${bar.city} · ${shareText(bar.median_land_share)}">
+        <span>${bar.city === top[0]?.city || bar.city === top[top.length - 1]?.city ? shareText(bar.median_land_share) : ''}</span>
       </div>`,
     )
     .join('')
-  const tilt = tiltSummary(payload.bands)
-  text(
-    '#tilt-headline',
-    tilt.regressive
-      ? `${tilt.spread} points lower on the priciest homes`
-      : `${Math.abs(tilt.spread)} points higher on the priciest homes`,
-  )
-  text(
-    '#bands-source',
-    `Cheapest tenth of homes sit at ${ratioText(tilt.cheapest)}, the priciest tenth at ${ratioText(tilt.priciest)}. Bands read left to right, cheapest to most expensive. Stored in ${payload.source === 'tiger' ? 'Tiger Data' : 'fairness.json'}.`,
-  )
+  if (top.length >= 2) {
+    text(
+      '#tilt-headline',
+      `${top[0].city} ${shareText(top[0].median_land_share)} · ${top[top.length - 1].city} ${shareText(top[top.length - 1].median_land_share)}`,
+    )
+  }
+  text('#bands-source', 'Cities read left to right, highest land share to lowest. County land and building values only.')
 }
 
-function paintRatioMeter(ratio) {
-  // Centre the rail on the county median so the fill reads as a deviation.
-  // The span covers the trimmed range of real ratios without clamping them.
-  const span = 0.6
-  const share = Math.max(0, Math.min(1, (ratio - (county.median_ratio - span / 2)) / span))
+function paintShareMeter(share) {
   const fill = document.querySelector('#ratio-fill')
-  fill.style.width = `${Math.round(share * 100)}%`
-  fill.dataset.state = ratio > county.median_ratio ? 'heavy' : 'light'
+  fill.style.width = `${Math.round(Math.max(0, Math.min(1, share)) * 100)}%`
+  fill.dataset.state = share >= 0.4 ? 'heavy' : 'light'
 }
 
 function renderHome(detail) {
   selectedPin = detail.pin
+  const built = detail.year_built ? `built ${detail.year_built}` : 'year built unknown'
+  const area = detail.heated_area ? `${Math.round(detail.heated_area).toLocaleString('en-US')} sq ft` : 'size unknown'
   text('#home-address', detail.address)
-  text(
-    '#home-meta',
-    `${detail.city} · sold ${saleDateText(detail.sale_date)} · built ${detail.year_built || '—'} · ${Math.round(detail.heated_area).toLocaleString('en-US')} sq ft`,
-  )
+  text('#home-meta', `${detail.city} · ${built} · ${area}`)
 
-  text('#home-ratio', ratioText(detail.ratio))
-  paintRatioMeter(detail.ratio)
+  text('#home-ratio', detail.verdict_label)
+  document.querySelector('#home-ratio').dataset.state = detail.verdict
+  paintShareMeter(detail.land_share)
   text(
     '#ratio-caption',
-    `County median is ${ratioText(county.median_ratio)}. This home sits ${percentText(100 * (detail.ratio / county.median_ratio - 1))} from it.`,
+    `Land is ${shareText(detail.land_share)} of the split. County typical is ${shareText(county.median_land_share)}.`,
   )
   document.querySelector('#home-figures').innerHTML = [
-    ['Sold for', dollars(detail.price)],
-    ['Assessed at', dollars(detail.assessed)],
-    ['County norm', dollars(detail.versus_county.implied_assessed)],
-    ['Difference', dollars(detail.versus_county.difference)],
+    ['Land', dollars(detail.land)],
+    ['Building', dollars(detail.building)],
+    ['Total assessed', dollars(detail.assessed)],
+    ['Last sale', detail.price ? dollars(detail.price) : '—'],
   ]
     .map(([label, value]) => `<div><dt>${label}</dt><dd>${value}</dd></div>`)
     .join('')
   show('#ratio-card', true)
 
-  const bits = []
-  if (detail.same_moment) {
-    bits.push(gapSentence(detail.versus_county))
-    if (detail.band) {
-      bits.push(
-        `Homes in this price band, ${dollars(detail.band.low_price)} to ${dollars(detail.band.high_price)}, carry a median ratio of ${ratioText(detail.band.median_ratio)} across ${detail.band.sales.toLocaleString('en-US')} sales.`,
-      )
-    }
-    if (detail.band && detail.cheapest_band_ratio > detail.band.median_ratio) {
-      bits.push(
-        `The cheapest tenth of Wake homes carry ${ratioText(detail.cheapest_band_ratio)}. At that ratio this home would be assessed ${dollars(detail.tilt.implied_assessed)}.`,
-      )
-    }
-  } else {
+  const bits = [verdictSentence(detail), detail.advice]
+  if (detail.tract.median_land_share) {
+    const versus = detail.versus_tract === null || detail.versus_tract === undefined
+      ? ''
+      : ` That is ${percentText(detail.versus_tract)} from the tract typical.`
     bits.push(
-      `This house last sold in ${detail.sale_year || 'another year'} for ${dollars(detail.price)}. The assessment, ${dollars(detail.assessed)}, is from the 2024 roll, so the ratio is not the same test as a 2024 sale.`,
+      `${detail.tract.name} typically sits at ${shareText(detail.tract.median_land_share)} land.${versus}`,
     )
-    if (detail.tract.median_ratio) {
-      bits.push(
-        `2024 sales in ${detail.tract.name} sit at a median ratio of ${ratioText(detail.tract.median_ratio)}. That is the fair comparison for this neighborhood.`,
-      )
-    }
   }
-  bits.push(
-    `A buyer of this house inherits the ${dollars(detail.assessed)} assessment until the 2028 revaluation. The sale price does not reset what the county taxes.`,
-  )
+  if (detail.year_built && detail.verdict === 'lot') {
+    bits.push(`The house was built in ${detail.year_built}, so this is a newer building on a high-value lot.`)
+  }
   document.querySelector('#gap-bits').innerHTML = bits.map((line) => `<p>${line}</p>`).join('')
   show('#gap-card', true)
   text('#chain-note', '')
   spoken = ''
 
-  // A new home is a new conversation, so earlier answers cannot be mistaken
-  // for answers about this one.
   selectedAddress = detail.address
   history = []
   endTalk()
@@ -198,36 +167,33 @@ function renderHome(detail) {
     radius: 9,
     color: '#ffffff',
     weight: 2,
-    fillColor: '#ffffff',
-    fillOpacity: 0.9,
+    fillColor: VERDICT_COLOR[detail.verdict] || '#ffffff',
+    fillOpacity: 0.95,
   })
     .addTo(map)
-    .bindPopup(`${detail.address}<br>ratio ${ratioText(detail.ratio)}`)
+    .bindPopup(`${detail.address}<br>${detail.verdict_label} · ${shareText(detail.land_share)} land`)
   map.setView([detail.lat, detail.lon], 14)
   loadTract(detail.tract.id)
 }
 
 function renderTract(detail) {
   text('#tract-name', detail.name)
-  if (!detail.enough_sales) {
+  if (!detail.enough_homes) {
     text(
       '#tract-summary',
-      `Only ${detail.sales} qualifying ${county.basis_year} sales here, under the 15 needed before a median is worth reporting.`,
+      `Only ${detail.homes} single-family homes here, under the 25 needed before a typical land share is worth reporting.`,
     )
     document.querySelector('#tract-figures').innerHTML = ''
   } else {
     text(
       '#tract-summary',
-      `${tractLabel(detail.relative_to_county)} · ${detail.sales.toLocaleString('en-US')} sales measured · median home sold for ${dollars(detail.median_price)}.`,
+      `${tractLabel(detail.relative_to_county)} · ${detail.homes.toLocaleString('en-US')} homes · typical land share ${shareText(detail.median_land_share)}.`,
     )
-    const housing = detail.housing || {}
     document.querySelector('#tract-figures').innerHTML = [
-      ['Median ratio', ratioText(detail.median_ratio)],
+      ['Typical land share', shareText(detail.median_land_share)],
       ['Vs county', percentText(detail.relative_to_county)],
-      ['Spread (COD)', detail.cod.toFixed(1)],
-      ['Owner occupied', housing.owner_share === null || housing.owner_share === undefined
-        ? '—'
-        : `${Math.round(housing.owner_share * 100)}%`],
+      ['Lots', detail.lot_count?.toLocaleString('en-US') ?? '—'],
+      ['Teardown watch', detail.teardown_count?.toLocaleString('en-US') ?? '—'],
     ]
       .map(([label, value]) => `<div><dt>${label}</dt><dd>${value}</dd></div>`)
       .join('')
@@ -239,8 +205,8 @@ function renderTract(detail) {
       L.circleMarker([point.lat, point.lon], {
         radius: 4,
         weight: 1,
-        color: point.ratio > detail.county_median_ratio ? '#e5484d' : '#10b981',
-        fillOpacity: 0.7,
+        color: VERDICT_COLOR[point.verdict] || '#8f8f8f',
+        fillOpacity: 0.75,
       }).on('click', () => selectParcel(point.pin)),
     ),
   ).addTo(map)
@@ -266,12 +232,12 @@ async function loadTracts() {
       color: '#030303',
       weight: 1,
       fillColor: tractColor(feature.properties.relative_to_county),
-      fillOpacity: feature.properties.enough_sales ? 0.45 : 0.2,
+      fillOpacity: feature.properties.enough_homes ? 0.45 : 0.2,
     }),
     onEachFeature: (feature, layer) => {
       const props = feature.properties
       layer.bindTooltip(
-        `${props.name}<br>${props.enough_sales ? `ratio ${ratioText(props.median_ratio)} · ${percentText(props.relative_to_county)}` : 'too few sales'}`,
+        `${props.name}<br>${props.enough_homes ? `${shareText(props.median_land_share)} land · ${percentText(props.relative_to_county)}` : 'too few homes'}`,
         { sticky: true },
       )
       layer.on('click', () => loadTract(props.id))
@@ -282,53 +248,32 @@ async function loadTracts() {
 
 async function loadCounty() {
   county = await (await fetch(`${API}/county`)).json()
-  renderStandards()
-  text('#scope-headline', `Wake County · median ratio ${ratioText(county.median_ratio)}`)
+  renderCounty()
+  text('#scope-headline', `Wake County · ${shareText(county.median_land_share)} land`)
   text(
     '#scope-detail',
-    `${county.sales.toLocaleString('en-US')} single-family sales from ${county.basis_year}, the year the current values took effect`,
+    `${county.homes.toLocaleString('en-US')} single-family homes on the 2024 roll`,
   )
-  renderBands(await (await fetch(`${API}/bands`)).json())
-  await loadInherit(350000)
+  renderCities(await (await fetch(`${API}/cities`)).json())
+  await loadHotspots()
 }
 
-async function loadInherit(budget) {
-  const response = await fetch(`${API}/inherit?budget=${budget}`)
+async function loadHotspots() {
+  const response = await fetch(`${API}/hotspots`)
   if (!response.ok) return
   const payload = await response.json()
-  text('#buy-headline', inheritSentence(payload))
-  document.querySelector('#budget').value = String(Math.round(payload.budget))
-  if (!payload.sales) {
-    text('#buy-note', 'No 2024 sales closed at or under that budget.')
-    document.querySelector('#buy-places').innerHTML = ''
-    return
-  }
-  text(
-    '#buy-note',
-    `${payload.sales.toLocaleString('en-US')} sales at or under ${dollars(payload.budget)}. ` +
-      `Neighborhoods below are where those buyers inherited the heaviest ratios. Assessments stay until ${payload.next_revaluation}.`,
-  )
+  text('#buy-headline', hotspotSentence(payload))
+  text('#buy-note', payload.meaning)
   document.querySelector('#buy-places').innerHTML = payload.neighborhoods
     .map(
       (place) => `<button type="button" class="buy-place" data-tract="${place.id}">
         <strong>${place.name}</strong>
-        <span>${place.sales} sales · typical ${dollars(place.median_price)}</span>
-        <span class="buy-ratio">${ratioText(place.median_ratio)} · ${percentText(place.relative_to_county)}</span>
+        <span>${place.homes} homes · ${place.teardown_count} teardown watch</span>
+        <span class="buy-ratio">${shareText(place.median_land_share)} land · ${percentText(place.relative_to_county)}</span>
       </button>`,
     )
     .join('')
 }
-
-document.querySelector('#buy-form').addEventListener('submit', (event) => {
-  event.preventDefault()
-  loadInherit(Number(document.querySelector('#budget').value))
-})
-
-document.querySelector('#buy-presets').addEventListener('click', (event) => {
-  const button = event.target.closest('button[data-budget]')
-  if (!button) return
-  loadInherit(Number(button.dataset.budget))
-})
 
 document.querySelector('#buy-places').addEventListener('click', (event) => {
   const button = event.target.closest('button[data-tract]')
@@ -343,7 +288,7 @@ function renderMatches(matches) {
   searchResults.innerHTML = matches
     .map(
       (match) => `<button type="button" data-pin="${match.pin}" data-address="${match.address}">
-        ${match.address}<span class="match-city">${match.city} · ${saleDateText(match.sale_date)}</span>
+        ${match.address}<span class="match-city">${match.city}${match.verdict ? ` · ${match.verdict}` : ''}</span>
       </button>`,
     )
     .join('')
@@ -439,7 +384,7 @@ function setVoiceState(state) {
 function renderChat(pending, listening) {
   const turns = history.map(
     (turn) => `<div class="turn turn-${turn.role}">
-      <span class="who">${turn.role === 'you' ? 'You' : 'Fair Share'}</span>
+      <span class="who">${turn.role === 'you' ? 'You' : 'House or Lot'}</span>
       ${toParagraphs(turn.text).map((line) => `<p>${line}</p>`).join('')}
     </div>`,
   )
@@ -447,7 +392,7 @@ function renderChat(pending, listening) {
     turns.push(`<div class="turn turn-you pending"><span class="who">You</span><p>${listening}</p></div>`)
   }
   if (pending) {
-    turns.push(`<div class="turn turn-assistant pending"><span class="who">Fair Share</span><p>${pending}</p></div>`)
+    turns.push(`<div class="turn turn-assistant pending"><span class="who">House or Lot</span><p>${pending}</p></div>`)
   }
   chat.innerHTML = turns.join('')
   chat.scrollTop = chat.scrollHeight

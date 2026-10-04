@@ -51,7 +51,7 @@ test('suggested questions follow whether a home is selected', () => {
   assert.equal(county.length, 3)
   assert.equal(home.length, 3)
   assert.match(county[0], /Wake County/)
-  assert.match(home[0], /my assessment/)
+  assert.match(home[0], /house or a lot/)
   assert.notDeepEqual(county, home)
 })
 
