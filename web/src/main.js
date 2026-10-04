@@ -2,6 +2,7 @@ import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 
 import './style.css'
+import { activateTab } from './panel.js'
 import {
   afterAssistantSpoke,
   afterRecognitionEnded,
@@ -20,7 +21,6 @@ import {
   dollars,
   hotspotSentence,
   percentText,
-  saleDateText,
   shareText,
   tractColor,
   tractLabel,
@@ -31,6 +31,9 @@ const API = 'http://127.0.0.1:8000'
 const WAKE_CENTER = [35.79, -78.65]
 
 const map = L.map('map', { center: WAKE_CENTER, zoom: 10, zoomControl: true })
+new ResizeObserver(() => map.invalidateSize()).observe(document.querySelector('#map'))
+// Standard OSM tiles, darkened in CSS so the basemap sits behind the data
+// instead of competing with it.
 L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
   attribution: '&copy; OpenStreetMap',
   maxZoom: 19,
@@ -52,10 +55,7 @@ function show(id, visible) {
 }
 
 function frameMap(bounds) {
-  const overlay = window.matchMedia('(min-width: 861px)').matches
-  map.fitBounds(bounds, overlay
-    ? { paddingTopLeft: [24, 24], paddingBottomRight: [408, 24] }
-    : { padding: [24, 24] })
+  map.fitBounds(bounds, { padding: [32, 32] })
 }
 
 function renderLegend() {
@@ -109,14 +109,15 @@ function renderCities(payload) {
   text('#bands-source', 'Cities read left to right, highest land share to lowest. County land and building values only.')
 }
 
-function paintShareMeter(share) {
+function paintShareMeter(share, verdict) {
   const fill = document.querySelector('#ratio-fill')
   fill.style.width = `${Math.round(Math.max(0, Math.min(1, share)) * 100)}%`
-  fill.dataset.state = share >= 0.4 ? 'heavy' : 'light'
+  fill.dataset.state = verdict || (share >= 0.4 ? 'lot' : 'house')
 }
 
 function renderHome(detail) {
   selectedPin = detail.pin
+  document.querySelector('#home-empty').hidden = true
   const built = detail.year_built ? `built ${detail.year_built}` : 'year built unknown'
   const area = detail.heated_area ? `${Math.round(detail.heated_area).toLocaleString('en-US')} sq ft` : 'size unknown'
   text('#home-address', detail.address)
@@ -124,7 +125,7 @@ function renderHome(detail) {
 
   text('#home-ratio', detail.verdict_label)
   document.querySelector('#home-ratio').dataset.state = detail.verdict
-  paintShareMeter(detail.land_share)
+  paintShareMeter(detail.land_share, detail.verdict)
   text(
     '#ratio-caption',
     `Land is ${shareText(detail.land_share)} of the split. County typical is ${shareText(county.median_land_share)}.`,
@@ -213,12 +214,14 @@ function renderTract(detail) {
 }
 
 async function loadTract(tractId) {
+  activateTab('neighborhood')
   const response = await fetch(`${API}/tract?id=${tractId}`)
   if (!response.ok) return
   renderTract(await response.json())
 }
 
 async function selectParcel(pin) {
+  activateTab('home')
   const response = await fetch(`${API}/parcel?pin=${pin}`)
   if (!response.ok) return
   renderHome(await response.json())
@@ -307,6 +310,11 @@ async function runSearch(query) {
 searchInput.addEventListener('input', () => {
   clearTimeout(searchTimer)
   searchTimer = setTimeout(() => runSearch(searchInput.value), 180)
+})
+
+document.querySelector('#search-form').addEventListener('submit', (event) => {
+  event.preventDefault()
+  runSearch(searchInput.value)
 })
 
 searchResults.addEventListener('click', (event) => {
