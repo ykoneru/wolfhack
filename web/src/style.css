@@ -451,9 +451,6 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outlin
 #scope-detail { max-width: 225px; font-size: 11px; }
 main:has(#map) { margin-left: 88px; min-height: 0; }
 #map { --surface: #0a0a0a; --text-primary: #fff; --border: #1f1f1f; background: #0a0a0a; }
-.map-intro { position: absolute; z-index: 500; top: 20px; left: 50%; transform: translateX(-50%); background: white; border: 1px solid var(--border); border-radius: 6px; padding: 14px 22px; box-shadow: 0 2px 8px #0002; display: flex; flex-direction: column; gap: 5px; width: max-content; max-width: calc(100% - 120px); pointer-events: none; }
-.map-intro strong { font-size: 14px; font-weight: 600; }
-.map-intro span { font-size: 12px; color: var(--text-secondary); }
 #panel { display: none; position: absolute; inset: auto auto 24px 24px; margin: 0; width: 500px; max-width: calc(100% - 48px); height: min(660px, calc(100% - 48px)); max-height: calc(100% - 48px); padding: 0; gap: 0; color: var(--text-primary); overflow: hidden; border-radius: 10px; border: 1px solid var(--border); box-shadow: 0 8px 36px #0003; background: white; }
 #panel[open] { display: flex; flex-direction: column; }
 .details-heading { display: flex; align-items: center; justify-content: space-between; padding: 12px 20px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
@@ -508,9 +505,6 @@ main:has(#map) { margin-left: 88px; min-height: 0; }
   #search-form { width: 100%; }
   .scope { display: none; }
   main:has(#map) { margin: 0 0 70px; }
-  .map-intro { top: 16px; left: auto; right: 12px; transform: none; padding: 10px 12px; max-width: calc(100% - 70px); }
-  .map-intro strong { font-size: 11px; }
-  .map-intro span { display: none; }
   #panel { inset: auto 0 0; width: 100%; max-width: 100%; height: 85%; max-height: 100%; border-radius: 16px 16px 0 0; }
   .property-summary { padding: 12px 20px; }
   #ratio-card { margin-top: 8px; }
@@ -526,3 +520,19 @@ main:has(#map) { margin-left: 88px; min-height: 0; }
 
 /* Explicit native-control reset keeps Safari consistent with other browsers. */
 button { -webkit-appearance: none; appearance: none; }
+
+.tract-summary-popup .leaflet-popup-content-wrapper { white-space: normal; background: #fff; color: #202124; border: 1px solid #dedee3; border-radius: 8px; box-shadow: 0 3px 16px #0003; }
+.tract-tooltip-content { display: flex; flex-direction: column; gap: 6px; line-height: 1.45; }
+.tract-tooltip-title { font-size: 16px; }
+.tract-tooltip-location { font-size: 11px; color: #62646e; }
+.tract-tooltip-source { font-size: 10px; color: #62646e; }
+.tract-tooltip-assessment { font-size: 14px; margin-top: 8px; }
+.tract-tooltip-comparison { font-size: 12px; }
+.tract-tooltip-basis { font-size: 11px; color: #62646e; }
+.tract-tooltip-action { font-size: 11px; color: #b51f2c; border-top: 1px solid #e7e7eb; padding-top: 9px; margin-top: 4px; }
+
+.tract-summary-popup .leaflet-popup-content { margin: 20px; max-width: calc(100vw - 80px); }
+.tract-summary-popup .leaflet-popup-tip { background: white; border: 0; }
+.tract-summary-popup .leaflet-popup-close-button { color: #62646e; }
+.tract-summary-popup .tract-tooltip-action { background: transparent; border: 0; border-top: 1px solid #e7e7eb; border-radius: 0; text-align: left; padding: 10px 0 0; cursor: pointer; }
+.tract-summary-popup .tract-tooltip-action:hover { color: #861620; text-decoration: underline; }

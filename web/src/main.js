@@ -3,6 +3,7 @@ import 'leaflet/dist/leaflet.css'
 
 import './style.css'
 import { activateTab } from './panel.js'
+import { tractSummaryCard, assessmentSummary } from './map-context.js'
 import {
   afterAssistantSpoke,
   afterRecognitionEnded,
@@ -26,7 +27,6 @@ import {
   standardRow,
   tiltSummary,
   tractColor,
-  tractLabel,
 } from './fairness.js'
 
 const API = 'http://127.0.0.1:8000'
@@ -43,6 +43,7 @@ L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
 
 let county = null
 let tractLayer = null
+let tractPlaces = {}
 let salesLayer = null
 let homeMarker = null
 let selectedPin = null
@@ -208,7 +209,8 @@ function renderHome(detail) {
 }
 
 function renderTract(detail) {
-  text('#tract-name', detail.name)
+  const places = tractPlaces[detail.id] || []
+  text('#tract-name', places.length ? places.join(' / ') : 'Wake County area')
   if (!detail.enough_sales) {
     text(
       '#tract-summary',
@@ -218,14 +220,14 @@ function renderTract(detail) {
   } else {
     text(
       '#tract-summary',
-      `${tractLabel(detail.relative_to_county)} · ${detail.sales.toLocaleString('en-US')} sales measured · median home sold for ${dollars(detail.median_price)}.`,
+      `${detail.name}, a census statistical area. ${assessmentSummary(detail).comparison} Based on ${detail.sales.toLocaleString('en-US')} qualifying 2024 sales.`,
     )
     const housing = detail.housing || {}
     document.querySelector('#tract-figures').innerHTML = [
-      ['Median ratio', ratioText(detail.median_ratio)],
-      ['Vs county', percentText(detail.relative_to_county)],
-      ['Spread (COD)', detail.cod.toFixed(1)],
-      ['Owner occupied', housing.owner_share === null || housing.owner_share === undefined
+      ['Assessed value as a share of sale price (median)', `${(detail.median_ratio * 100).toFixed(1)}%`],
+      ['Compared with Wake County’s typical assessment level', percentText(detail.relative_to_county)],
+      ['Assessment variation (coefficient of dispersion; lower means more consistent)', `${detail.cod.toFixed(1)}%`],
+      ['Households living in a home they own', housing.owner_share === null || housing.owner_share === undefined
         ? '—'
         : `${Math.round(housing.owner_share * 100)}%`],
     ]
@@ -263,6 +265,7 @@ async function selectParcel(pin) {
 async function loadTracts() {
   const response = await fetch('/wake-tracts.geojson')
   const geojson = await response.json()
+  tractPlaces = await fetch('/tract-places.json').then(response => response.ok ? response.json() : {}).catch(() => ({}))
   tractLayer = L.geoJSON(geojson, {
     style: (feature) => ({
       color: '#030303',
@@ -272,11 +275,24 @@ async function loadTracts() {
     }),
     onEachFeature: (feature, layer) => {
       const props = feature.properties
-      layer.bindTooltip(
-        `${props.name}<br>${props.enough_sales ? `ratio ${ratioText(props.median_ratio)} · ${percentText(props.relative_to_county)}` : 'too few sales'}`,
-        { sticky: true },
-      )
-      layer.on('click', () => loadTract(props.id))
+      const card = tractSummaryCard(props, tractPlaces[props.id], () => {
+        layer.closePopup()
+        loadTract(props.id)
+      })
+      layer.bindPopup(card, {
+        className: 'tract-summary-popup',
+        maxWidth: 310,
+        minWidth: 240,
+        autoPan: true,
+        closeButton: true,
+      })
+      const highlight = () => layer.setStyle({ color: '#ffffff', weight: 2, fillOpacity: 0.6 })
+      layer.on('mouseover', highlight)
+      layer.on('mouseout', () => {
+        if (!layer.isPopupOpen()) tractLayer.resetStyle(layer)
+      })
+      layer.on('popupopen', highlight)
+      layer.on('popupclose', () => tractLayer.resetStyle(layer))
     },
   }).addTo(map)
   frameMap(tractLayer.getBounds())
