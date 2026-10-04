@@ -2,36 +2,67 @@ import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 
 import './style.css'
-import { activateTab } from './panel.js'
+import { dismissHint, initHint } from './hint.js'
+import { closeAsk, closeDetails, openDetails } from './panel.js'
 import {
-  afterAssistantSpoke,
-  afterRecognitionEnded,
+  askAboutLabel,
   normalizeQuestion,
+  prettyPlace,
   suggestedQuestions,
   toParagraphs,
-  transcriptFromResults,
   trimHistory,
-  voiceStatus,
 } from './conversation.js'
+import { cautionFlags } from './caution.js'
+import { ASK_COPY, COMPARE, DISCLAIMER, FOR_SALE, LOT_PREVIEW, MAP_VIEW, SEARCH_COPY } from './config.js'
 import {
   NO_DATA_COLOR,
-  SCALE,
   VERDICT_COLOR,
-  barHeights,
   dollars,
-  hotspotSentence,
   percentText,
+  shareColor,
+  shareRange,
   shareText,
-  tractColor,
-  tractLabel,
   verdictSentence,
 } from './split.js'
+import { defaultSalePrefs, parseSaleNumber, saleCountLabel, saleMatches } from './sale.js'
+import {
+  compareSubjectName,
+  compareViewHtml,
+  countySubject,
+  exportCompareFilename,
+  exportCompareMarkup,
+  exportFilename,
+  exportSplitMarkup,
+  homeSubject,
+  isCountyCompareQuery,
+  matchNeighborhoods,
+  neighborhoodSubject,
+} from './tools.js'
 
 const API = 'http://127.0.0.1:8000'
 const WAKE_CENTER = [35.79, -78.65]
 
-const map = L.map('map', { center: WAKE_CENTER, zoom: 10, zoomControl: true })
-new ResizeObserver(() => map.invalidateSize()).observe(document.querySelector('#map'))
+const map = L.map('map', { center: WAKE_CENTER, zoom: 10, zoomControl: false, attributionControl: true })
+map.createPane('tracts')
+map.getPane('tracts').style.zIndex = 400
+map.createPane('homes')
+map.getPane('homes').style.zIndex = 450
+map.createPane('listings')
+map.getPane('listings').style.zIndex = 460
+map.attributionControl.setPrefix(false)
+let wakeBounds = L.latLngBounds(MAP_VIEW.wakeBounds)
+let framedWake = false
+applyWakeFrame(true)
+new ResizeObserver(() => {
+  map.invalidateSize()
+  applyWakeFrame()
+}).observe(document.querySelector('#map'))
+const lotPreviewHost = document.querySelector('#lot-preview')
+if (lotPreviewHost) {
+  new ResizeObserver(() => {
+    if (lotPreview && lotPreviewHost.offsetWidth) lotPreview.invalidateSize()
+  }).observe(lotPreviewHost)
+}
 // Standard OSM tiles, darkened in CSS so the basemap sits behind the data
 // instead of competing with it.
 L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -41,10 +72,24 @@ L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
 
 let county = null
 let tractLayer = null
+let tractGeojson = null
 let salesLayer = null
+let listingLayer = null
+let listingRows = []
+let listingFetchedAt = null
+let listingWindowDays = 30
+let forSaleOn = false
 let homeMarker = null
+let parcelLayer = null
+let lotPreview = null
+let shareScale = { min: 0, max: 1 }
 let selectedPin = null
-let spoken = ''
+let selectedAddress = null
+let selectedNeighborhood = null
+let selectedHome = null
+let compareA = null
+let compareB = null
+let lastQuery = ''
 
 function text(id, value) {
   document.querySelector(id).textContent = value
@@ -54,59 +99,186 @@ function show(id, visible) {
   document.querySelector(id).hidden = !visible
 }
 
+function applyWakeFrame(force = false) {
+  if (!wakeBounds || !map.getSize().x) return
+  if (framedWake && !force) return
+  map.fitBounds(wakeBounds, {
+    paddingTopLeft: MAP_VIEW.paddingTopLeft,
+    paddingBottomRight: MAP_VIEW.paddingBottomRight,
+    animate: false,
+  })
+  map.setMaxBounds(wakeBounds.pad(MAP_VIEW.maxBoundsPad))
+  const fitted = map.getBoundsZoom(wakeBounds, false, MAP_VIEW.paddingTopLeft)
+  if (Number.isFinite(fitted)) map.setMinZoom(Math.max(MAP_VIEW.minZoom, fitted))
+  framedWake = true
+}
+
 function frameMap(bounds) {
-  map.fitBounds(bounds, { padding: [32, 32] })
+  wakeBounds = bounds
+  framedWake = false
+  applyWakeFrame(true)
 }
 
-function renderLegend() {
-  const items = SCALE.map(
-    (step) => `<li><span class="swatch" style="background:${step.color}"></span> ${step.label}</li>`,
-  )
-  items.push(`<li><span class="swatch" style="background:${NO_DATA_COLOR}"></span> Too few homes</li>`)
-  document.querySelector('#legend').innerHTML = items.join('')
-}
-
-function renderCounty() {
-  const rows = [
-    ['Typical land share', shareText(county.median_land_share)],
-    ['Priced as a house', county.house_count.toLocaleString('en-US')],
-    ['Priced as a lot', county.lot_count.toLocaleString('en-US')],
-    ['Teardown watch', county.teardown_count.toLocaleString('en-US')],
-  ]
-  document.querySelector('#standards').innerHTML = rows
-    .map(
-      ([name, value]) => `<li>
-        <span class="standard-name">${name}</span>
-        <strong class="standard-value">${value}</strong>
-      </li>`,
-    )
-    .join('')
-  text('#verdict', `${shareText(county.median_land_share)} land`)
-  document.querySelector('#verdict').dataset.state = 'house'
-  text(
-    '#verdict-note',
-    `Measured on ${county.homes.toLocaleString('en-US')} single-family homes. Land share is land divided by land plus building. At 40% or more, the purchase is a lot.`,
-  )
-}
-
-function renderCities(payload) {
-  const top = (payload.cities || []).slice(0, 10)
-  const bars = barHeights(top)
-  document.querySelector('#bands').innerHTML = bars
-    .map(
-      (bar) => `<div class="bar" style="height:${bar.height}%"
-        title="${bar.city} · ${shareText(bar.median_land_share)}">
-        <span>${bar.city === top[0]?.city || bar.city === top[top.length - 1]?.city ? shareText(bar.median_land_share) : ''}</span>
-      </div>`,
-    )
-    .join('')
-  if (top.length >= 2) {
-    text(
-      '#tilt-headline',
-      `${top[0].city} ${shareText(top[0].median_land_share)} · ${top[top.length - 1].city} ${shareText(top[top.length - 1].median_land_share)}`,
-    )
+function renderMapLegend(range) {
+  let box = document.querySelector('#map-legend')
+  if (!box) {
+    box = document.createElement('aside')
+    box.id = 'map-legend'
+    box.className = 'map-legend'
+    box.setAttribute('aria-label', 'Percent of assessed value in land')
+    document.querySelector('#map').appendChild(box)
+    L.DomEvent.disableClickPropagation(box)
+    L.DomEvent.disableScrollPropagation(box)
   }
-  text('#bands-source', 'Cities read left to right, highest land share to lowest. County land and building values only.')
+  box.innerHTML = `
+    <p class="map-legend-title">% of assessed value in land</p>
+    <div class="map-legend-bar" aria-hidden="true"></div>
+    <div class="map-legend-ticks">
+      <span>${shareText(range.min)}</span>
+      <span>${shareText((range.min + range.max) / 2)}</span>
+      <span>${shareText(range.max)}</span>
+    </div>
+    <div class="map-legend-swatch"><i></i> Insufficient data</div>`
+}
+
+function clearHighlight() {
+  if (homeMarker) {
+    homeMarker.remove()
+    homeMarker = null
+  }
+  if (parcelLayer) {
+    parcelLayer.remove()
+    parcelLayer = null
+  }
+  if (salesLayer) {
+    salesLayer.remove()
+    salesLayer = null
+  }
+}
+
+function resetHomePanel() {
+  selectedPin = null
+  selectedAddress = null
+  selectedHome = null
+  syncExport()
+  paintCompare()
+  updateAskContext()
+  renderSuggestions()
+  show('#home-summary', false)
+  text('#home-address', '')
+  text('#home-meta', '')
+  clearLotPreview()
+  show('#ratio-card', false)
+  show('#gap-card', false)
+  show('#caution-badge', false)
+  show('#listing-badge', false)
+  show('#result-disclaimer', false)
+}
+
+function syncHighlightVisibility() {
+  const zoom = map.getZoom()
+  if (homeMarker) {
+    if (zoom < MAP_VIEW.hideHighlightBelowZoom) homeMarker.remove()
+    else if (!map.hasLayer(homeMarker)) homeMarker.addTo(map)
+  }
+  if (parcelLayer) {
+    if (zoom < MAP_VIEW.hideHighlightBelowZoom) parcelLayer.remove()
+    else if (!map.hasLayer(parcelLayer)) parcelLayer.addTo(map)
+  }
+  if (salesLayer) {
+    if (forSaleOn || zoom < MAP_VIEW.hidePointsBelowZoom) salesLayer.remove()
+    else if (!map.hasLayer(salesLayer)) salesLayer.addTo(map)
+  }
+  const tractPane = map.getPane('tracts')
+  if (tractPane) {
+    tractPane.style.pointerEvents = zoom >= MAP_VIEW.hidePointsBelowZoom && salesLayer ? 'none' : ''
+  }
+}
+
+function clearLotPreview() {
+  if (lotPreview) {
+    lotPreview.remove()
+    lotPreview = null
+  }
+  const host = document.querySelector('#lot-preview')
+  const note = document.querySelector('#lot-preview-note')
+  if (host) {
+    host.hidden = true
+    host.replaceChildren()
+  }
+  if (note) {
+    note.hidden = true
+    note.textContent = ''
+  }
+}
+
+function renderLotPreview(detail) {
+  const host = document.querySelector('#lot-preview')
+  const note = document.querySelector('#lot-preview-note')
+  if (!host || detail.lat == null || detail.lon == null) {
+    clearLotPreview()
+    return
+  }
+  clearLotPreview()
+  host.hidden = false
+  lotPreview = L.map(host, {
+    center: [detail.lat, detail.lon],
+    zoom: LOT_PREVIEW.zoom,
+    zoomControl: false,
+    attributionControl: true,
+    scrollWheelZoom: false,
+  })
+  lotPreview.attributionControl.setPrefix(false)
+  L.tileLayer(LOT_PREVIEW.tiles, {
+    attribution: LOT_PREVIEW.attribution,
+    maxZoom: LOT_PREVIEW.zoom,
+  }).addTo(lotPreview)
+  if (detail.geometry) {
+    const outline = L.geoJSON(detail.geometry, {
+      style: {
+        color: '#ffffff',
+        weight: 2,
+        fillColor: VERDICT_COLOR[detail.verdict] || '#ffffff',
+        fillOpacity: 0.16,
+      },
+    }).addTo(lotPreview)
+    lotPreview.fitBounds(outline.getBounds(), { padding: [14, 14], maxZoom: LOT_PREVIEW.zoom })
+  }
+  if (note) {
+    note.hidden = false
+    note.textContent = LOT_PREVIEW.caption
+  }
+  requestAnimationFrame(() => lotPreview?.invalidateSize())
+  window.setTimeout(() => lotPreview?.invalidateSize(), 220)
+}
+
+function markParcel(detail) {
+  clearHighlight()
+  const color = VERDICT_COLOR[detail.verdict] || '#ffffff'
+  if (detail.geometry) {
+    parcelLayer = L.geoJSON(detail.geometry, {
+      style: {
+        color: '#ffffff',
+        weight: 2,
+        fillColor: color,
+        fillOpacity: 0.18,
+      },
+    }).addTo(map)
+  }
+  homeMarker = L.marker([detail.lat, detail.lon], {
+    icon: L.divIcon({
+      className: 'home-pin',
+      html: `<span class="home-pin-dot" style="background:${color}"></span>`,
+      iconSize: [18, 18],
+      iconAnchor: [9, 9],
+    }),
+    keyboard: false,
+  })
+    .addTo(map)
+    .bindPopup(`${detail.address}<br>${detail.verdict_label} · ${shareText(detail.land_share)} land`)
+  const target = parcelLayer ? parcelLayer.getBounds() : L.latLngBounds([detail.lat, detail.lon], [detail.lat, detail.lon])
+  map.flyToBounds(target.pad(0.4), { maxZoom: MAP_VIEW.flyZoom, duration: 0.6 })
+  syncHighlightVisibility()
 }
 
 function paintShareMeter(share, verdict) {
@@ -117,11 +289,19 @@ function paintShareMeter(share, verdict) {
 
 function renderHome(detail) {
   selectedPin = detail.pin
-  document.querySelector('#home-empty').hidden = true
+  show('#home-summary', true)
   const built = detail.year_built ? `built ${detail.year_built}` : 'year built unknown'
   const area = detail.heated_area ? `${Math.round(detail.heated_area).toLocaleString('en-US')} sq ft` : 'size unknown'
   text('#home-address', detail.address)
   text('#home-meta', `${detail.city} · ${built} · ${area}`)
+  const listingBadge = document.querySelector('#listing-badge')
+  if (detail.listing?.price) {
+    listingBadge.hidden = false
+    listingBadge.textContent = `For sale · ${dollars(detail.listing.price)}`
+  } else {
+    listingBadge.hidden = true
+    listingBadge.textContent = ''
+  }
 
   text('#home-ratio', detail.verdict_label)
   document.querySelector('#home-ratio').dataset.state = detail.verdict
@@ -131,8 +311,8 @@ function renderHome(detail) {
     `Land is ${shareText(detail.land_share)} of the split. County typical is ${shareText(county.median_land_share)}.`,
   )
   document.querySelector('#home-figures').innerHTML = [
-    ['Land', dollars(detail.land)],
-    ['Building', dollars(detail.building)],
+    ['Land', `${dollars(detail.land)} · ${shareText(detail.land_share)}`],
+    ['Building', `${dollars(detail.building)} · ${shareText(1 - detail.land_share)}`],
     ['Total assessed', dollars(detail.assessed)],
     ['Last sale', detail.price ? dollars(detail.price) : '—'],
   ]
@@ -154,157 +334,306 @@ function renderHome(detail) {
   }
   document.querySelector('#gap-bits').innerHTML = bits.map((line) => `<p>${line}</p>`).join('')
   show('#gap-card', true)
+  const flags = cautionFlags(detail)
+  const badge = document.querySelector('#caution-badge')
+  if (flags.length) {
+    badge.hidden = false
+    badge.textContent = flags[0].reason
+  } else {
+    badge.hidden = true
+    badge.textContent = ''
+  }
+  const note = document.querySelector('#result-disclaimer')
+  note.hidden = false
+  note.innerHTML = `${DISCLAIMER} <a href="/method.html">Learn more</a>`
   text('#chain-note', '')
-  spoken = ''
 
   selectedAddress = detail.address
+  selectedHome = detail
+  syncExport()
   history = []
-  endTalk()
+  updateAskContext()
   renderChat()
   renderSuggestions()
 
-  if (homeMarker) homeMarker.remove()
-  homeMarker = L.circleMarker([detail.lat, detail.lon], {
-    radius: 9,
-    color: '#ffffff',
-    weight: 2,
-    fillColor: VERDICT_COLOR[detail.verdict] || '#ffffff',
-    fillOpacity: 0.95,
-  })
-    .addTo(map)
-    .bindPopup(`${detail.address}<br>${detail.verdict_label} · ${shareText(detail.land_share)} land`)
-  map.setView([detail.lat, detail.lon], 14)
-  loadTract(detail.tract.id)
+  markParcel(detail)
+  loadTract(detail.tract.id, { open: false })
+  if (comparePanelOpen()) {
+    closeDetails()
+    paintCompare()
+  } else {
+    openDetails()
+    renderLotPreview(detail)
+  }
 }
 
 function renderTract(detail) {
-  text('#tract-name', detail.name)
-  if (!detail.enough_homes) {
-    text(
-      '#tract-summary',
-      `Only ${detail.homes} single-family homes here, under the 25 needed before a typical land share is worth reporting.`,
-    )
-    document.querySelector('#tract-figures').innerHTML = ''
-  } else {
-    text(
-      '#tract-summary',
-      `${tractLabel(detail.relative_to_county)} · ${detail.homes.toLocaleString('en-US')} homes · typical land share ${shareText(detail.median_land_share)}.`,
-    )
-    document.querySelector('#tract-figures').innerHTML = [
-      ['Typical land share', shareText(detail.median_land_share)],
-      ['Vs county', percentText(detail.relative_to_county)],
-      ['Lots', detail.lot_count?.toLocaleString('en-US') ?? '—'],
-      ['Teardown watch', detail.teardown_count?.toLocaleString('en-US') ?? '—'],
-    ]
-      .map(([label, value]) => `<div><dt>${label}</dt><dd>${value}</dd></div>`)
-      .join('')
-  }
+  selectedNeighborhood = detail.name
+  updateAskContext()
+  renderSuggestions()
 
   if (salesLayer) salesLayer.remove()
   salesLayer = L.layerGroup(
     detail.points.map((point) =>
       L.circleMarker([point.lat, point.lon], {
-        radius: 4,
-        weight: 1,
-        color: VERDICT_COLOR[point.verdict] || '#8f8f8f',
-        fillOpacity: 0.75,
-      }).on('click', () => selectParcel(point.pin)),
+        pane: 'homes',
+        radius: 6,
+        weight: 2,
+        color: '#ffffff',
+        fillColor: VERDICT_COLOR[point.verdict] || '#8f8f8f',
+        fillOpacity: 0.95,
+        bubblingMouseEvents: false,
+      })
+        .bindTooltip(
+          `${point.address} · ${point.verdict === 'teardown' ? 'Teardown watch' : point.verdict === 'lot' ? 'Lot' : 'House'}`,
+          {
+          direction: 'top',
+          className: 'map-tooltip',
+        })
+        .on('click', () => selectParcel(point.pin)),
     ),
-  ).addTo(map)
+  )
+  syncHighlightVisibility()
 }
 
-async function loadTract(tractId) {
-  activateTab('neighborhood')
+async function loadTract(tractId, { open = false } = {}) {
+  if (open) dismissHint()
   const response = await fetch(`${API}/tract?id=${tractId}`)
   if (!response.ok) return
   renderTract(await response.json())
 }
 
 async function selectParcel(pin) {
-  activateTab('home')
+  openDetails()
   const response = await fetch(`${API}/parcel?pin=${pin}`)
-  if (!response.ok) return
+  if (!response.ok) {
+    clearHighlight()
+    resetHomePanel()
+    setSearchState('error', SEARCH_COPY.error)
+    return
+  }
   renderHome(await response.json())
+  setSearchState('success')
+  dismissHint()
+}
+
+function tractTooltip(props) {
+  if (!props.enough_homes) return `${props.name} · Insufficient data`
+  return `${props.name} · ${shareText(props.median_land_share)} land`
 }
 
 async function loadTracts() {
-  const response = await fetch('/wake-tracts.geojson')
-  const geojson = await response.json()
+  const [geoResponse, landResponse] = await Promise.all([
+    fetch('/wake-tracts.geojson'),
+    fetch('/land.json'),
+  ])
+  const geojson = await geoResponse.json()
+  const land = landResponse.ok ? await landResponse.json() : { tracts: {} }
+  for (const feature of geojson.features) {
+    const row = land.tracts?.[feature.properties.id]
+    if (!row) continue
+    feature.properties.median_land = row.median_land
+    feature.properties.median_building = row.median_building
+    feature.properties.homes = row.homes
+  }
+  tractGeojson = geojson
+  shareScale = shareRange(
+    geojson.features
+      .filter((feature) => feature.properties.enough_homes)
+      .map((feature) => feature.properties.median_land_share),
+  )
   tractLayer = L.geoJSON(geojson, {
-    style: (feature) => ({
-      color: '#030303',
-      weight: 1,
-      fillColor: tractColor(feature.properties.relative_to_county),
-      fillOpacity: feature.properties.enough_homes ? 0.45 : 0.2,
-    }),
+    pane: 'tracts',
+    style: tractStyle,
     onEachFeature: (feature, layer) => {
-      const props = feature.properties
-      layer.bindTooltip(
-        `${props.name}<br>${props.enough_homes ? `${shareText(props.median_land_share)} land · ${percentText(props.relative_to_county)}` : 'too few homes'}`,
-        { sticky: true },
-      )
-      layer.on('click', () => loadTract(props.id))
+      layer.bindTooltip(tractTooltip(feature.properties), { sticky: true, className: 'map-tooltip' })
+      layer.on('click', () => loadTract(feature.properties.id))
     },
-  }).addTo(map)
+  })
   frameMap(tractLayer.getBounds())
+  tractLayer.addTo(map)
+  renderMapLegend(shareScale)
+}
+
+function tractStyle(feature) {
+  const enough = feature.properties.enough_homes
+  const fill = enough ? shareColor(feature.properties.median_land_share, shareScale) : NO_DATA_COLOR
+  return {
+    color: '#111111',
+    weight: 1,
+    fillColor: fill,
+    fillOpacity: enough ? 0.5 : 0.28,
+  }
 }
 
 async function loadCounty() {
   county = await (await fetch(`${API}/county`)).json()
-  renderCounty()
-  text('#scope-headline', `Wake County · ${shareText(county.median_land_share)} land`)
-  text(
-    '#scope-detail',
-    `${county.homes.toLocaleString('en-US')} single-family homes on the 2024 roll`,
-  )
-  renderCities(await (await fetch(`${API}/cities`)).json())
-  await loadHotspots()
 }
 
-async function loadHotspots() {
-  const response = await fetch(`${API}/hotspots`)
+async function loadListings() {
+  const response = await fetch(`${API}/listings`)
   if (!response.ok) return
   const payload = await response.json()
-  text('#buy-headline', hotspotSentence(payload))
-  text('#buy-note', payload.meaning)
-  document.querySelector('#buy-places').innerHTML = payload.neighborhoods
-    .map(
-      (place) => `<button type="button" class="buy-place" data-tract="${place.id}">
-        <strong>${place.name}</strong>
-        <span>${place.homes} homes · ${place.teardown_count} teardown watch</span>
-        <span class="buy-ratio">${shareText(place.median_land_share)} land · ${percentText(place.relative_to_county)}</span>
-      </button>`,
-    )
-    .join('')
+  listingFetchedAt = payload.fetched_at || null
+  listingWindowDays = Number(payload.window_days) || 30
+  listingRows = (payload.listings || []).filter((row) => row.lat && row.lon)
+  if (listingLayer) {
+    listingLayer.remove()
+    listingLayer = null
+  }
+  paintSaleCount()
+  if (forSaleOn) paintListingLayer()
 }
 
-document.querySelector('#buy-places').addEventListener('click', (event) => {
-  const button = event.target.closest('button[data-tract]')
-  if (button) loadTract(button.dataset.tract)
-})
+function filteredListings() {
+  return saleMatches(listingRows, readSalePrefs())
+}
+
+function paintListingLayer() {
+  if (listingLayer) {
+    listingLayer.remove()
+    listingLayer = null
+  }
+  if (!forSaleOn) return
+  const rows = filteredListings()
+  if (!rows.length) {
+    renderForSaleNote()
+    return
+  }
+  listingLayer = L.layerGroup(
+    rows.map((row) =>
+      L.circleMarker([row.lat, row.lon], {
+        pane: 'listings',
+        radius: 5,
+        weight: 2,
+        color: '#c62828',
+        fillColor: '#ffffff',
+        fillOpacity: 0.95,
+        bubblingMouseEvents: false,
+      })
+        .bindTooltip(
+          `${row.address} · for sale${row.price ? ` · ${dollars(row.price)}` : ''}${
+            Number.isFinite(Number(row.land_share)) ? ` · ${shareText(row.land_share)} land` : ''
+          }`,
+          { direction: 'top', className: 'map-tooltip' },
+        )
+        .on('click', () => {
+          searchInput.value = row.address
+          document.querySelector('#search-form').requestSubmit()
+        }),
+    ),
+  ).addTo(map)
+  renderForSaleNote()
+}
+
+function renderForSaleNote() {
+  let box = document.querySelector('#for-sale-note')
+  if (!box) {
+    box = document.createElement('aside')
+    box.id = 'for-sale-note'
+    box.className = 'for-sale-note'
+    box.setAttribute('aria-live', 'polite')
+    document.querySelector('#map').appendChild(box)
+    L.DomEvent.disableClickPropagation(box)
+  }
+  const rows = forSaleOn ? filteredListings() : []
+  if (!forSaleOn || !rows.length) {
+    box.hidden = true
+    box.textContent = ''
+    return
+  }
+  box.hidden = false
+  box.textContent = `${rows.length.toLocaleString('en-US')} for sale · listed in the last ${listingWindowDays} days`
+}
+
+function setForSale(on) {
+  forSaleOn = Boolean(on) && listingRows.length > 0
+  const toggle = document.querySelector('#for-sale-toggle')
+  if (toggle) {
+    toggle.setAttribute('aria-pressed', String(forSaleOn))
+    toggle.classList.toggle('rail-active', forSaleOn)
+  }
+  document.body.classList.toggle('for-sale-on', forSaleOn)
+  if (forSaleOn) paintListingLayer()
+  else {
+    if (listingLayer) {
+      listingLayer.remove()
+      listingLayer = null
+    }
+    renderForSaleNote()
+  }
+  syncHighlightVisibility()
+}
 
 const searchInput = document.querySelector('#search')
 const searchResults = document.querySelector('#search-results')
+const searchSubmit = document.querySelector('.search-submit')
+const searchSpinner = document.querySelector('#search-spinner')
+const searchStatus = document.querySelector('#search-status')
+const searchRetry = document.querySelector('#search-retry')
 let searchTimer = null
+
+function setSearchState(state, message = '') {
+  document.querySelector('#search-form').dataset.state = state
+  searchStatus.dataset.state = state
+  searchStatus.textContent = message
+  const loading = state === 'loading'
+  searchSubmit.disabled = loading
+  searchSpinner.hidden = !loading
+  searchRetry.hidden = state !== 'error'
+}
 
 function renderMatches(matches) {
   searchResults.innerHTML = matches
     .map(
       (match) => `<button type="button" data-pin="${match.pin}" data-address="${match.address}">
-        ${match.address}<span class="match-city">${match.city}${match.verdict ? ` · ${match.verdict}` : ''}</span>
+        ${match.address}<span class="match-city">${match.city}${match.verdict ? ` · ${match.verdict}` : ''}${match.for_sale ? ' · for sale' : ''}</span>
       </button>`,
     )
     .join('')
 }
 
-async function runSearch(query) {
-  if (query.trim().length < 3) {
+async function runSearch(query, { submit = false } = {}) {
+  if (submit) dismissHint()
+  lastQuery = query
+  const trimmed = query.trim()
+  if (trimmed.length < 3) {
     searchResults.innerHTML = ''
-    return
+    setSearchState('idle')
+    return []
   }
-  const response = await fetch(`${API}/search?q=${encodeURIComponent(query)}`)
-  if (!response.ok) return
-  renderMatches((await response.json()).matches)
+  setSearchState('loading')
+  try {
+    const response = await fetch(`${API}/search?q=${encodeURIComponent(trimmed)}`)
+    if (!response.ok) throw new Error('search failed')
+    const matches = (await response.json()).matches || []
+    if (!matches.length) {
+      searchResults.innerHTML = ''
+      if (submit) {
+        clearHighlight()
+        resetHomePanel()
+      }
+      setSearchState('empty', SEARCH_COPY.notFound)
+      return []
+    }
+    renderMatches(matches)
+    if (matches.length === 1 && submit) {
+      searchInput.value = matches[0].address
+      searchResults.innerHTML = ''
+      await selectParcel(matches[0].pin)
+      return matches
+    }
+    setSearchState('success', matches.length > 1 ? SEARCH_COPY.pick : '')
+    return matches
+  } catch {
+    searchResults.innerHTML = ''
+    if (submit) {
+      clearHighlight()
+      resetHomePanel()
+    }
+    setSearchState('error', SEARCH_COPY.error)
+    return []
+  }
 }
 
 searchInput.addEventListener('input', () => {
@@ -314,7 +643,11 @@ searchInput.addEventListener('input', () => {
 
 document.querySelector('#search-form').addEventListener('submit', (event) => {
   event.preventDefault()
-  runSearch(searchInput.value)
+  runSearch(searchInput.value, { submit: true })
+})
+
+searchRetry.addEventListener('click', () => {
+  runSearch(lastQuery || searchInput.value, { submit: true })
 })
 
 searchResults.addEventListener('click', (event) => {
@@ -328,197 +661,129 @@ searchResults.addEventListener('click', (event) => {
 document.querySelectorAll('.demo').forEach((button) => {
   button.addEventListener('click', async () => {
     searchInput.value = button.dataset.query
-    await runSearch(button.dataset.query)
-    const first = searchResults.querySelector('button[data-pin]')
-    if (first) first.click()
+    const matches = await runSearch(button.dataset.query, { submit: true })
+    if (matches.length > 1) {
+      searchInput.value = matches[0].address
+      searchResults.innerHTML = ''
+      selectParcel(matches[0].pin)
+    }
   })
 })
 
-const hear = document.querySelector('#hear')
-hear.addEventListener('click', async () => {
-  if (!selectedPin) return
-  hear.disabled = true
-  const original = hear.textContent
-  try {
-    if (!spoken) {
-      hear.textContent = 'Thinking…'
-      const response = await fetch(`${API}/explain`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pin: selectedPin }),
-      })
-      const payload = await response.json()
-      spoken = payload.reply
-      document.querySelector('#gap-bits').innerHTML = spoken
-        .split(/(?<=\.)\s+/)
-        .filter(Boolean)
-        .map((line) => `<p>${line}</p>`)
-        .join('')
-    }
-    hear.textContent = 'Speaking…'
-    await speak(spoken)
-  } finally {
-    hear.textContent = original
-    hear.disabled = false
-  }
-})
+map.on('zoomend', syncHighlightVisibility)
 
 const chat = document.querySelector('#chat')
 const suggestions = document.querySelector('#suggestions')
+const suggestPrompt = document.querySelector('#suggest-prompt')
 const askForm = document.querySelector('#ask-form')
 const questionInput = document.querySelector('#question')
 const askButton = document.querySelector('#ask')
-const talkButton = document.querySelector('#talk')
-const stopTalk = document.querySelector('#stop-talk')
-const voiceLine = document.querySelector('#voice-status')
-const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
+const askError = document.querySelector('#ask-error')
+const askErrorText = document.querySelector('#ask-error-text')
+const retryAsk = document.querySelector('#retry-ask')
 let history = []
-let selectedAddress = null
-let player = null
-let speakDone = null
-let recognition = null
-let talking = false
-let voiceState = 'idle'
-let lastHeard = ''
+let pending = false
+let lastFailedQuestion = ''
 
-function setVoiceState(state) {
-  voiceState = state
-  voiceLine.textContent = voiceStatus(state)
-  voiceLine.dataset.state = state
-  talkButton.hidden = talking
-  stopTalk.hidden = !talking
+function compareAskSubject(item) {
+  if (!item) return null
+  if (item.kind === 'home' && item.pin) return { kind: 'home', pin: item.pin }
+  if (item.kind === 'neighborhood') return { kind: 'neighborhood', id: item.id || item.tract?.id || '' }
+  if (item.kind === 'county') return { kind: 'county' }
+  return null
 }
 
-function renderChat(pending, listening) {
-  const turns = history.map(
-    (turn) => `<div class="turn turn-${turn.role}">
-      <span class="who">${turn.role === 'you' ? 'You' : 'House or Lot'}</span>
-      ${toParagraphs(turn.text).map((line) => `<p>${line}</p>`).join('')}
-    </div>`,
-  )
-  if (listening) {
-    turns.push(`<div class="turn turn-you pending"><span class="who">You</span><p>${listening}</p></div>`)
+function compareAskPayload() {
+  if (!comparePanelOpen() || (!compareA && !compareB)) return null
+  return {
+    left: compareAskSubject(compareA),
+    right: compareAskSubject(compareB),
   }
-  if (pending) {
-    turns.push(`<div class="turn turn-assistant pending"><span class="who">House or Lot</span><p>${pending}</p></div>`)
+}
+
+function askContext() {
+  if (comparePanelOpen() && (compareA || compareB)) {
+    return {
+      compare: true,
+      leftName: compareSubjectName(compareA),
+      rightName: compareSubjectName(compareB),
+    }
+  }
+  return { address: selectedAddress, neighborhood: selectedNeighborhood }
+}
+
+function updateAskContext() {
+  const line = document.querySelector('#ask-context')
+  if (line) line.textContent = askAboutLabel(askContext())
+  if (typeof renderSuggestions === 'function') renderSuggestions()
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+}
+
+function growQuestion() {
+  questionInput.style.height = 'auto'
+  const line = 24
+  questionInput.style.height = `${Math.min(questionInput.scrollHeight, line * 4)}px`
+}
+
+function syncSend() {
+  askButton.disabled = pending || !normalizeQuestion(questionInput.value)
+}
+
+function setAskError(message) {
+  askError.hidden = !message
+  askErrorText.textContent = message || ''
+}
+
+function renderChat(waiting) {
+  const turns = history.map((turn) => {
+    const body = toParagraphs(turn.text)
+      .map((line) => `<p>${escapeHtml(line)}</p>`)
+      .join('')
+    const avatar =
+      turn.role === 'assistant' ? '<span class="ask-avatar" aria-hidden="true">H</span>' : ''
+    return `<div class="turn turn-${turn.role}">
+      ${avatar}
+      <div class="bubble">${body}</div>
+    </div>`
+  })
+  if (waiting) {
+    turns.push(`<div class="turn turn-assistant pending">
+      <span class="ask-avatar" aria-hidden="true">H</span>
+      <div class="bubble"><span class="typing" aria-label="Thinking"></span></div>
+    </div>`)
   }
   chat.innerHTML = turns.join('')
   chat.scrollTop = chat.scrollHeight
 }
 
 function renderSuggestions() {
-  suggestions.innerHTML = suggestedQuestions(selectedAddress ? { address: selectedAddress } : null)
-    .map((question) => `<button type="button" class="suggestion">${question}</button>`)
+  suggestions.innerHTML = suggestedQuestions(askContext())
+    .map((question) => `<button type="button" class="suggestion">${escapeHtml(question)}</button>`)
     .join('')
-}
-
-function stopVoice() {
-  if (player) {
-    player.pause()
-    player = null
-  }
-  if (speakDone) {
-    speakDone()
-    speakDone = null
-  }
-}
-
-function stopRecognition() {
-  if (!recognition) return
-  recognition.onresult = null
-  recognition.onerror = null
-  recognition.onend = null
-  try {
-    recognition.stop()
-  } catch {
-    // Already stopped.
-  }
-  recognition = null
-}
-
-function endTalk() {
-  talking = false
-  lastHeard = ''
-  stopRecognition()
-  stopVoice()
-  setVoiceState('idle')
-}
-
-async function speak(text) {
-  const response = await fetch(`${API}/speak`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text }),
-  })
-  if (!response.ok) return
-  stopVoice()
-  player = new Audio(URL.createObjectURL(await response.blob()))
-  await player.play()
-  await new Promise((resolve) => {
-    speakDone = resolve
-    player.addEventListener('ended', resolve, { once: true })
-    player.addEventListener('error', resolve, { once: true })
-  })
-  speakDone = null
-  player = null
-}
-
-function startListening() {
-  if (!talking) return
-  if (!SpeechRecognition) {
-    talking = false
-    setVoiceState('idle')
-    voiceLine.textContent = 'This browser cannot listen. Type a question instead.'
-    return
-  }
-  stopRecognition()
-  lastHeard = ''
-  recognition = new SpeechRecognition()
-  recognition.lang = 'en-US'
-  recognition.continuous = false
-  recognition.interimResults = true
-  recognition.maxAlternatives = 1
-  recognition.onresult = (event) => {
-    const heard = transcriptFromResults(event.results)
-    lastHeard = heard.final || heard.heard
-    if (heard.heard) renderChat(null, heard.heard)
-  }
-  recognition.onerror = (event) => {
-    if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
-      talking = false
-      setVoiceState('idle')
-      voiceLine.textContent = 'Allow the microphone, then click Talk again.'
-    }
-  }
-  recognition.onend = async () => {
-    const heard = lastHeard
-    lastHeard = ''
-    const next = afterRecognitionEnded(talking, heard)
-    setVoiceState(next)
-    if (next === 'thinking') {
-      await sendQuestion(heard)
-    } else if (next === 'listening') {
-      window.setTimeout(() => {
-        if (talking && voiceState === 'listening') startListening()
-      }, 250)
-    }
-  }
-  setVoiceState('listening')
-  try {
-    recognition.start()
-  } catch {
-    // A second start while the last one is closing.
-  }
+  const compact = history.length > 0
+  suggestions.classList.toggle('is-compact', compact)
+  suggestPrompt.hidden = compact
 }
 
 async function sendQuestion(raw) {
   const question = normalizeQuestion(raw)
-  if (!question) return
+  if (!question || pending) return
+  lastFailedQuestion = ''
+  setAskError('')
   questionInput.value = ''
-  askButton.disabled = true
+  growQuestion()
+  pending = true
   history.push({ role: 'you', text: question })
-  setVoiceState(talking ? 'thinking' : voiceState)
-  renderChat('Thinking…')
+  syncSend()
+  renderChat(true)
+  renderSuggestions()
   try {
     const response = await fetch(`${API}/ask`, {
       method: 'POST',
@@ -527,41 +792,53 @@ async function sendQuestion(raw) {
         pin: selectedPin || '',
         question,
         history: trimHistory(history.slice(0, -1)),
+        compare: compareAskPayload(),
       }),
     })
     const payload = await response.json()
+    if (!response.ok && !payload.reply) throw new Error('ask failed')
     const reply = payload.reply || payload.error || 'That did not go through. Try again.'
     history.push({ role: 'assistant', text: reply })
     renderChat()
-    if (talking) setVoiceState('speaking')
-    await speak(reply)
-  } catch (error) {
-    history.push({ role: 'assistant', text: 'The assistant is unreachable. Check that the API is running.' })
+  } catch {
+    lastFailedQuestion = question
+    setAskError(ASK_COPY.error)
     renderChat()
   } finally {
-    askButton.disabled = false
-    if (!talking) questionInput.focus()
-    else if (afterAssistantSpoke(talking) === 'listening') startListening()
+    pending = false
+    syncSend()
+    questionInput.focus()
   }
 }
-
-talkButton.addEventListener('click', () => {
-  talking = true
-  setVoiceState('listening')
-  startListening()
-})
-
-stopTalk.addEventListener('click', endTalk)
 
 askForm.addEventListener('submit', (event) => {
   event.preventDefault()
   sendQuestion(questionInput.value)
 })
 
+questionInput.addEventListener('input', () => {
+  growQuestion()
+  syncSend()
+})
+
+questionInput.addEventListener('keydown', (event) => {
+  if (event.key === 'Enter' && !event.shiftKey) {
+    event.preventDefault()
+    if (!askButton.disabled) askForm.requestSubmit()
+  }
+})
+
 suggestions.addEventListener('click', (event) => {
   const button = event.target.closest('.suggestion')
   if (button) sendQuestion(button.textContent)
 })
+
+retryAsk.addEventListener('click', () => {
+  if (lastFailedQuestion) sendQuestion(lastFailedQuestion)
+})
+
+updateAskContext()
+syncSend()
 
 const saveButton = document.querySelector('#save-ratio')
 saveButton.addEventListener('click', async () => {
@@ -582,8 +859,386 @@ saveButton.addEventListener('click', async () => {
   }
 })
 
-renderLegend()
+const comparePanel = document.querySelector('#compare-panel')
+const compareSearch = document.querySelector('#compare-search')
+const compareResults = document.querySelector('#compare-results')
+const compareStatus = document.querySelector('#compare-status')
+const exportButton = document.querySelector('#export-split')
+let compareTimer = null
+let compareSearchGen = 0
+
+function comparePanelOpen() {
+  const panel = document.querySelector('#compare-panel')
+  return Boolean(panel && !panel.hidden)
+}
+
+function compareLeft() {
+  return compareA
+}
+
+function canExportCompare() {
+  return comparePanelOpen() && Boolean(compareA && compareB)
+}
+
+function syncExport() {
+  exportButton.disabled = !(canExportCompare() || (!comparePanelOpen() && selectedHome))
+}
+
+function placeCompare(item) {
+  if (!compareLeft()) compareA = item
+  else compareB = item
+}
+
+function comparePlaceholder() {
+  if (!compareA) return COMPARE.placeholder
+  if (!compareB) return COMPARE.placeholderSecond
+  return COMPARE.placeholderMore
+}
+
+function paintCompare() {
+  if (!comparePanel) return
+  compareSearch.placeholder = comparePlaceholder()
+  document.querySelector('#compare-body').innerHTML = compareViewHtml(compareLeft(), compareB, county)
+  syncExport()
+  updateAskContext()
+}
+
+function openCompare() {
+  closeDetails()
+  closeSale()
+  comparePanel.hidden = false
+  document.body.classList.add('compare-open')
+  const toggle = document.querySelector('#compare-homes')
+  toggle.setAttribute('aria-expanded', 'true')
+  toggle.classList.add('rail-active')
+  paintCompare()
+  compareSearch.focus()
+}
+
+function closeCompare() {
+  compareA = null
+  compareB = null
+  cancelCompareSearch()
+  compareSearch.value = ''
+  compareResults.innerHTML = ''
+  compareStatus.textContent = ''
+  paintCompare()
+  comparePanel.hidden = true
+  document.body.classList.remove('compare-open')
+  const toggle = document.querySelector('#compare-homes')
+  toggle.setAttribute('aria-expanded', 'false')
+  toggle.classList.remove('rail-active')
+  syncExport()
+}
+
+const salePanel = document.querySelector('#for-sale-panel')
+const saleShow = document.querySelector('#sale-show')
+const salePriceMin = document.querySelector('#sale-price-min')
+const salePriceMax = document.querySelector('#sale-price-max')
+const saleLandMin = document.querySelector('#sale-land-min')
+const saleLandMax = document.querySelector('#sale-land-max')
+
+function salePanelOpen() {
+  return Boolean(salePanel && !salePanel.hidden)
+}
+
+function readSalePrefs() {
+  let priceMin = parseSaleNumber(salePriceMin?.value)
+  let priceMax = parseSaleNumber(salePriceMax?.value)
+  if (priceMin != null && priceMax != null && priceMin > priceMax) {
+    ;[priceMin, priceMax] = [priceMax, priceMin]
+  }
+  let landMin = parseSaleNumber(saleLandMin?.value)
+  let landMax = parseSaleNumber(saleLandMax?.value)
+  if (landMin != null) landMin = Math.max(0, Math.min(100, landMin))
+  if (landMax != null) landMax = Math.max(0, Math.min(100, landMax))
+  if (landMin != null && landMax != null && landMin > landMax) {
+    ;[landMin, landMax] = [landMax, landMin]
+  }
+  return { priceMin, priceMax, landMin, landMax }
+}
+
+function paintSaleCount() {
+  if (!saleShow) return
+  if (!listingRows.length) {
+    saleShow.textContent = FOR_SALE.empty
+    saleShow.disabled = true
+    return
+  }
+  const count = filteredListings().length
+  saleShow.textContent = saleCountLabel(count)
+  saleShow.disabled = count === 0
+}
+
+function resetSaleControls() {
+  const defaults = defaultSalePrefs()
+  if (salePriceMin) salePriceMin.value = defaults.priceMin ?? ''
+  if (salePriceMax) salePriceMax.value = defaults.priceMax ?? ''
+  if (saleLandMin) saleLandMin.value = defaults.landMin ?? ''
+  if (saleLandMax) saleLandMax.value = defaults.landMax ?? ''
+  paintSaleCount()
+}
+
+function openSale() {
+  closeAsk()
+  closeCompare()
+  if (salePanel) salePanel.hidden = false
+  document.body.classList.add('sale-open')
+  paintSaleCount()
+  setForSale(true)
+}
+
+function closeSale() {
+  if (salePanel) salePanel.hidden = true
+  document.body.classList.remove('sale-open')
+  setForSale(false)
+}
+
+function localCompareChoices(query) {
+  const choices = []
+  if (isCountyCompareQuery(query)) {
+    const item = countySubject(county)
+    if (item) choices.push({ kind: 'county', label: item.label, note: 'County typical land and building' })
+  }
+  for (const props of matchNeighborhoods(tractGeojson?.features, query)) {
+    choices.push({
+      kind: 'neighborhood',
+      id: props.id,
+      label: props.name,
+      note: props.enough_homes === false ? 'Insufficient data' : 'Neighborhood typical',
+    })
+  }
+  return choices
+}
+
+function renderCompareChoices(local, matches) {
+  const localButtons = local.map((choice) => {
+    if (choice.kind === 'county') {
+      return `<button type="button" data-kind="county">${choice.label}<span class="match-city">${choice.note}</span></button>`
+    }
+    return `<button type="button" data-kind="neighborhood" data-tract-id="${choice.id}">${choice.label}<span class="match-city">${choice.note}</span></button>`
+  })
+  const homeButtons = matches.map(
+    (match) => `<button type="button" data-kind="home" data-pin="${match.pin}" data-address="${match.address}">
+      ${match.address}<span class="match-city">${match.city || ''}${match.verdict ? ` · ${match.verdict}` : ''}${match.for_sale ? ' · for sale' : ''}</span>
+    </button>`,
+  )
+  compareResults.innerHTML = [...localButtons, ...homeButtons].join('')
+}
+
+function cancelCompareSearch() {
+  clearTimeout(compareTimer)
+  compareSearchGen += 1
+}
+
+async function runCompareSearch(query, { submit = false } = {}) {
+  const trimmed = query.trim()
+  const gen = ++compareSearchGen
+  if (trimmed.length < 3) {
+    compareResults.innerHTML = ''
+    compareStatus.textContent = ''
+    return []
+  }
+  const local = localCompareChoices(trimmed)
+  compareStatus.textContent = 'Searching…'
+  try {
+    const response = await fetch(`${API}/search?q=${encodeURIComponent(trimmed)}`)
+    if (gen !== compareSearchGen) return []
+    if (!response.ok) throw new Error('search failed')
+    const matches = (await response.json()).matches || []
+    if (!local.length && !matches.length) {
+      compareResults.innerHTML = ''
+      compareStatus.textContent = SEARCH_COPY.notFound
+      return []
+    }
+    renderCompareChoices(local, matches)
+    if (submit && local.length === 1 && !matches.length) {
+      compareResults.innerHTML = ''
+      selectCompareChoice(local[0])
+      return local
+    }
+    if (submit && matches.length === 1 && !local.length) {
+      compareSearch.value = matches[0].address
+      compareResults.innerHTML = ''
+      await selectCompareParcel(matches[0].pin)
+      return matches
+    }
+    compareStatus.textContent = local.length + matches.length > 1 ? SEARCH_COPY.pick : ''
+    return matches
+  } catch {
+    if (local.length) {
+      renderCompareChoices(local, [])
+      compareStatus.textContent = ''
+      return local
+    }
+    compareResults.innerHTML = ''
+    compareStatus.textContent = SEARCH_COPY.error
+    return []
+  }
+}
+
+function finishComparePlace() {
+  compareSearch.value = ''
+  compareResults.innerHTML = ''
+  compareStatus.textContent = ''
+  paintCompare()
+  compareSearch.focus()
+}
+
+function selectCompareChoice(choice) {
+  cancelCompareSearch()
+  if (choice.kind === 'county') {
+    const item = countySubject(county)
+    if (!item) return
+    placeCompare(item)
+  } else if (choice.kind === 'neighborhood') {
+    const feature = tractGeojson?.features.find((row) => row.properties.id === choice.id)
+    const item = neighborhoodSubject(feature?.properties || { id: choice.id, name: choice.label })
+    if (!item) return
+    placeCompare(item)
+  }
+  finishComparePlace()
+}
+
+async function selectCompareParcel(pin) {
+  cancelCompareSearch()
+  compareStatus.textContent = 'Loading…'
+  try {
+    const response = await fetch(`${API}/parcel?pin=${pin}`)
+    if (!response.ok) throw new Error('parcel failed')
+    const detail = await response.json()
+    placeCompare(homeSubject(detail))
+    finishComparePlace()
+  } catch {
+    compareStatus.textContent = SEARCH_COPY.error
+  }
+}
+
+function neighborhoodGeometry(tractId) {
+  if (!tractGeojson || !tractId) return null
+  return tractGeojson.features.find((feature) => feature.properties.id === tractId)?.geometry || null
+}
+
+function openExportDocument(html, filename) {
+  if (!html) return
+  const popup = window.open('', '_blank')
+  if (popup) {
+    popup.document.write(html)
+    popup.document.close()
+    popup.focus()
+    popup.print()
+    return
+  }
+  const href = URL.createObjectURL(new Blob([html], { type: 'text/html' }))
+  const link = document.createElement('a')
+  link.href = href
+  link.download = filename
+  link.click()
+  URL.revokeObjectURL(href)
+}
+
+function printOrDownloadSplit(home) {
+  openExportDocument(
+    exportSplitMarkup(home, county, {
+      geometry: neighborhoodGeometry(home.tract?.id),
+    }),
+    exportFilename(home.address),
+  )
+}
+
+function printOrDownloadCompare() {
+  if (!compareA || !compareB) return
+  openExportDocument(exportCompareMarkup(compareA, compareB, county), exportCompareFilename(compareA, compareB))
+}
+
+function goCountyView() {
+  closeSale()
+  closeDetails()
+  closeCompare()
+  applyWakeFrame(true)
+}
+
+document.querySelector('.brand').addEventListener('click', (event) => {
+  if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+  event.preventDefault()
+  goCountyView()
+})
+document.querySelector('#reset-map').addEventListener('click', goCountyView)
+
+document.querySelector('#for-sale-toggle').addEventListener('click', () => {
+  if (salePanelOpen()) closeSale()
+  else openSale()
+})
+document.querySelector('#close-for-sale').addEventListener('click', () => closeSale())
+document.querySelector('#sale-reset').addEventListener('click', () => {
+  resetSaleControls()
+  if (forSaleOn) paintListingLayer()
+})
+document.querySelector('#sale-show').addEventListener('click', () => {
+  if (!listingRows.length) return
+  setForSale(true)
+  paintListingLayer()
+})
+for (const input of [salePriceMin, salePriceMax, saleLandMin, saleLandMax]) {
+  input?.addEventListener('input', paintSaleCount)
+}
+
+document.querySelector('#compare-homes').addEventListener('click', () => {
+  if (comparePanelOpen()) closeCompare()
+  else openCompare()
+})
+document.querySelector('#close-compare').addEventListener('click', closeCompare)
+document.querySelector('#compare-form').addEventListener('submit', (event) => {
+  event.preventDefault()
+  runCompareSearch(compareSearch.value, { submit: true })
+})
+compareSearch.addEventListener('input', () => {
+  clearTimeout(compareTimer)
+  compareTimer = setTimeout(() => runCompareSearch(compareSearch.value), 180)
+})
+compareResults.addEventListener('click', (event) => {
+  const button = event.target.closest('button[data-kind], button[data-pin]')
+  if (!button) return
+  const kind = button.dataset.kind || 'home'
+  if (kind === 'home') {
+    selectCompareParcel(button.dataset.pin)
+    return
+  }
+  selectCompareChoice({
+    kind,
+    id: button.dataset.tractId,
+    label: button.childNodes[0]?.textContent?.trim() || '',
+  })
+})
+document.querySelector('#compare-body').addEventListener('click', (event) => {
+  if (!event.target.closest('.compare-home.is-empty')) return
+  compareSearch.focus()
+})
+exportButton.addEventListener('click', () => {
+  if (canExportCompare()) printOrDownloadCompare()
+  else if (selectedHome) printOrDownloadSplit(selectedHome)
+})
+document.addEventListener(
+  'keydown',
+  (event) => {
+    if (event.key !== 'Escape') return
+    if (salePanelOpen()) {
+      event.preventDefault()
+      event.stopImmediatePropagation()
+      closeSale()
+      return
+    }
+    if (!comparePanelOpen()) return
+    event.preventDefault()
+    event.stopImmediatePropagation()
+    closeCompare()
+  },
+  true,
+)
+
 renderSuggestions()
-await Promise.all([loadCounty(), loadTracts()])
+initHint()
+syncExport()
+await Promise.all([loadCounty(), loadTracts(), loadListings()])
 const walletReady = await fetch(`${API}/appeal`).then((response) => response.json())
 if (walletReady.ready) saveButton.hidden = false

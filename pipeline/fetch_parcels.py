@@ -8,12 +8,17 @@ data/raw so the build can run without the network.
 from __future__ import annotations
 
 import json
+import sys
 import time
 from pathlib import Path
 
 import requests
 
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from pipeline.address import query_forms  # noqa: E402
 RAW = ROOT / "data" / "raw"
 OUT = RAW / "wake-homes.json"
 
@@ -97,37 +102,68 @@ def fetch_pin(pin: str) -> dict | None:
 
 def search_address(query: str, limit: int = 8) -> list[dict]:
     """Look up any single-family house by street."""
-    text = " ".join(query.strip().upper().split())
-    if len(text) < 3:
+    forms = [form.upper() for form in query_forms(query)]
+    if not forms:
         return []
-    safe = text.replace("'", "''")
+    found = []
+    seen: set[str] = set()
+    for form in forms:
+        if len(form) < 3:
+            continue
+        safe = form.replace("'", "''")
+        response = requests.get(
+            SERVICE,
+            params={
+                "where": (
+                    "TYPE_USE_DECODE = 'SINGLFAM' "
+                    "AND LAND_VAL > 0 "
+                    "AND BLDG_VAL > 0 "
+                    "AND TOTAL_VALUE_ASSD > 0 "
+                    f"AND UPPER(SITE_ADDRESS) LIKE '%{safe}%'"
+                ),
+                "outFields": ",".join(FIELDS),
+                "returnGeometry": "false",
+                "returnCentroid": "true",
+                "outSR": "4326",
+                "resultRecordCount": limit,
+                "f": "json",
+            },
+            headers={"User-Agent": USER_AGENT},
+            timeout=30,
+        )
+        response.raise_for_status()
+        for feature in response.json().get("features") or []:
+            row = record(feature)
+            if row and row["pin"] not in seen:
+                seen.add(row["pin"])
+                found.append(row)
+            if len(found) >= limit:
+                return found
+    return found
+
+
+def fetch_geometry(pin: str) -> dict | None:
+    """Parcel outline in WGS84, when Wake GIS has one."""
+    safe = str(pin).replace("'", "''")
     response = requests.get(
         SERVICE,
         params={
-            "where": (
-                "TYPE_USE_DECODE = 'SINGLFAM' "
-                "AND LAND_VAL > 0 "
-                "AND BLDG_VAL > 0 "
-                "AND TOTAL_VALUE_ASSD > 0 "
-                f"AND UPPER(SITE_ADDRESS) LIKE '%{safe}%'"
-            ),
-            "outFields": ",".join(FIELDS),
-            "returnGeometry": "false",
-            "returnCentroid": "true",
+            "where": f"PIN_NUM = '{safe}'",
+            "outFields": "PIN_NUM",
+            "returnGeometry": "true",
             "outSR": "4326",
-            "resultRecordCount": limit,
-            "f": "json",
+            "resultRecordCount": 1,
+            "f": "geojson",
         },
         headers={"User-Agent": USER_AGENT},
         timeout=30,
     )
     response.raise_for_status()
-    found = []
-    for feature in response.json().get("features") or []:
-        row = record(feature)
-        if row:
-            found.append(row)
-    return found
+    payload = response.json()
+    features = payload.get("features") or []
+    if not features:
+        return None
+    return features[0].get("geometry")
 
 
 def record(feature: dict) -> dict | None:

@@ -6,3 +6,7 @@ __pycache__/
 node_modules/
 .DS_Store
 data/raw/
+data/.rentcast-week
+data/listings.lock
+docs/Parcel-WolfHacks-pitch.pptx
+docs/make_pitch_deck.py

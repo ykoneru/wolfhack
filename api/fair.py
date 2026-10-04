@@ -1,4 +1,4 @@
-"""Lookups for House or Lot. Numbers come from land.json."""
+"""Lookups for Parcel. Numbers come from land.json."""
 
 from __future__ import annotations
 
@@ -20,7 +20,18 @@ from pipeline.land import (
     median,
     verdict_label,
 )
-from pipeline.fetch_parcels import fetch_pin, search_address
+from pipeline.address import address_matches, query_forms
+from pipeline.fetch_parcels import fetch_geometry, fetch_pin, search_address
+from pipeline.listings import (
+    MAX_ON_MARKET_DAYS,
+    find_listing,
+    index_listings,
+    listing_key,
+    listings_in_wake,
+    load_listings,
+    public_listing,
+    recent_listings,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 LAND_PATH = ROOT / "data" / "land.json"
@@ -87,14 +98,13 @@ def hydrate(model: dict, raw: dict) -> dict:
 
 
 def search(model: dict, query: str, limit: int = 8) -> list[dict]:
-    text = " ".join(query.strip().lower().split())
-    if len(text) < 3:
+    forms = query_forms(query)
+    if not forms or len(forms[0]) < 3:
         return []
     found = []
     seen: set[str] = set()
     for home in model["homes"]:
-        label = f"{home['address']} {home['city']}".lower()
-        if text in label:
+        if address_matches(query, home["address"], home.get("city") or ""):
             seen.add(home["pin"])
             found.append(_match(home))
         if len(found) >= limit:
@@ -103,6 +113,8 @@ def search(model: dict, query: str, limit: int = 8) -> list[dict]:
         remote = search_address(query, limit)
     except requests.RequestException as error:
         print(f"parcel search unavailable: {error}", flush=True)
+        if not found:
+            raise
         return found
     for raw in remote:
         if raw["pin"] in seen:
@@ -114,13 +126,23 @@ def search(model: dict, query: str, limit: int = 8) -> list[dict]:
     return found
 
 
+def _cached_sale_rows() -> list[dict]:
+    return recent_listings(listings_in_wake(load_listings().get("listings", [])))
+
+
+def _listing_for(address: str, city: str = "") -> dict | None:
+    return public_listing(find_listing(_cached_sale_rows(), address, city))
+
+
 def _match(home: dict) -> dict:
+    listing = _listing_for(home["address"], home.get("city") or "")
     return {
         "pin": home["pin"],
         "address": home["address"],
         "city": home["city"],
         "verdict": home.get("verdict"),
         "year_built": home.get("year_built"),
+        "for_sale": bool(listing),
     }
 
 
@@ -169,6 +191,8 @@ def parcel(model: dict, pin: str) -> dict:
             "id": tract.get("id"),
             "name": tract.get("name"),
             "median_land_share": tract.get("median_land_share"),
+            "median_land": tract.get("median_land"),
+            "median_building": tract.get("median_building"),
             "homes": tract.get("homes"),
             "relative_to_county": tract.get("relative_to_county"),
             "enough_homes": tract.get("enough_homes", False),
@@ -177,6 +201,8 @@ def parcel(model: dict, pin: str) -> dict:
             "teardown_count": tract.get("teardown_count"),
             "housing": tract.get("housing", {}),
         },
+        "geometry": _parcel_geometry(home),
+        "listing": _listing_for(home["address"], home.get("city") or ""),
         "county": {
             "median_land_share": county["median_land_share"],
             "homes": county["homes"],
@@ -275,6 +301,83 @@ def explain(model: dict, pin: str) -> dict:
     return {"reply": reply, "source": "gemini", "parcel": detail}
 
 
+def _finite(value) -> bool:
+    return isinstance(value, (int, float)) and value == value
+
+
+def discover_homes(model: dict) -> dict:
+    """Compact home index for Discover. For-sale flags reuse the on-disk listing cache."""
+    sale_index = index_listings(_cached_sale_rows())
+    homes = []
+    for home in model["homes"]:
+        assessed = home.get("assessed")
+        share = home.get("land_share")
+        lat = home.get("lat")
+        lon = home.get("lon")
+        if not _finite(assessed) or assessed <= 0:
+            continue
+        if not _finite(share):
+            continue
+        if not _finite(lat) or not _finite(lon):
+            continue
+        address = home.get("address") or ""
+        city = home.get("city") or ""
+        for_sale = listing_key(address, city) in sale_index or listing_key(address) in sale_index
+        homes.append(
+            {
+                "pin": home["pin"],
+                "address": home.get("address") or "",
+                "lat": lat,
+                "lon": lon,
+                "assessed": assessed,
+                "land_share": round(float(share), 4),
+                "tract_id": home.get("tract_id") or "",
+                "for_sale": for_sale,
+            }
+        )
+    return {
+        "homes": homes,
+        "sale_count": sum(1 for home in homes if home["for_sale"]),
+    }
+
+
+def _land_share_by_listing_key(model: dict | None) -> dict[str, float]:
+    index = {}
+    for home in (model or {}).get("homes") or []:
+        share = home.get("land_share")
+        if not _finite(share):
+            continue
+        address = home.get("address") or ""
+        city = home.get("city") or ""
+        value = float(share)
+        for key in (listing_key(address, city), listing_key(address)):
+            if key:
+                index[key] = value
+    return index
+
+
+def listings(model: dict | None = None) -> dict:
+    """Read the on-disk RentCast cache. Never calls RentCast."""
+    payload = load_listings()
+    shares = _land_share_by_listing_key(model)
+    rows = []
+    for row in recent_listings(listings_in_wake(payload.get("listings", []))):
+        item = public_listing(row)
+        if not item:
+            continue
+        key = listing_key(row.get("address") or "", row.get("city") or "")
+        share = shares.get(key) or shares.get(listing_key(row.get("address") or ""))
+        if share is not None:
+            item["land_share"] = round(share, 4)
+        rows.append(item)
+    return {
+        "fetched_at": payload.get("fetched_at"),
+        "source": payload.get("source") or "RentCast",
+        "window_days": MAX_ON_MARKET_DAYS,
+        "listings": rows,
+    }
+
+
 def cities(model: dict) -> dict:
     county = model["county"]
     return {
@@ -306,6 +409,19 @@ def _fallback(detail: dict) -> str:
         f"Land is {share} percent of the county split, "
         f"{advice(detail['verdict'])}"
     )
+
+
+def _parcel_geometry(home: dict) -> dict | None:
+    if home.get("geometry"):
+        return home["geometry"]
+    try:
+        geometry = fetch_geometry(home["pin"])
+    except requests.RequestException as error:
+        print(f"parcel geometry unavailable: {error}", flush=True)
+        return None
+    if geometry:
+        home["geometry"] = geometry
+    return geometry
 
 
 # Older server imports still name this inherit.

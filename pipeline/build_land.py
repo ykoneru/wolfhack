@@ -239,6 +239,8 @@ def main() -> None:
                 "relative_to_county": row["relative_to_county"],
                 "homes": row.get("homes", 0),
                 "enough_homes": row["enough_homes"],
+                "median_land": row.get("median_land"),
+                "median_building": row.get("median_building"),
                 "lot_count": row.get("lot_count", 0),
                 "teardown_count": row.get("teardown_count", 0),
             },

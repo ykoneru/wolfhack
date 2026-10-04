@@ -1,4 +1,4 @@
-"""A spoken conversation about whether a buyer is purchasing a house or a lot."""
+"""A typed conversation about whether a buyer is purchasing a house or a lot."""
 
 from __future__ import annotations
 
@@ -14,19 +14,22 @@ MAX_QUESTION = 400
 MAX_TURN = 400
 
 RULES = (
-    "You are the voice of House or Lot, a tool that tells a Wake County buyer "
+    "You are Parcel, a tool that tells a Wake County buyer "
     "whether more of the county's value is the house or the land. "
-    "Your answer is read aloud, so reply in one or two short spoken sentences, "
+    "Reply in one or two short sentences, "
     "with no bullet points, no markdown, no headings, and no symbols other than dollar signs and percent signs. "
     "Do not recap facts the buyer already heard unless they asked again.\n"
     "Use only the figures in the data block. Never introduce a number that is not there.\n"
     "Land share is the county land value divided by land plus building. "
     "At or above 40 percent, the purchase is a lot. "
     "If it is also built in 1975 or earlier, it is teardown watch.\n"
-    "Never state or estimate a tax rate, a tax bill, a mortgage, a list price, or a rebuild cost.\n"
+    "Never state or estimate a tax rate, a tax bill, a mortgage, or a rebuild cost.\n"
+    "If listing_price is in the data, you may say it is the RentCast list price, not the assessed value. "
+    "If listing_price is missing, do not invent a list price.\n"
     "If asked about the county overall, say the typical land share and that some neighborhoods "
     "are priced more as land while others are priced more as houses. Neither is good or bad. "
     "If asked where lots cluster, use the hotspots block.\n"
+    "If a comparison block is present, answer about those two sides and do not ignore one of them.\n"
     "If the question cannot be answered from the data block, say so in one sentence and then state the "
     "closest fact you do have."
 )
@@ -71,19 +74,63 @@ def home_facts(detail: dict) -> dict:
         "tract_homes": tract.get("homes"),
         "tract_lot_count": tract.get("lot_count"),
         "tract_teardown_count": tract.get("teardown_count"),
+        "listing_price": (detail.get("listing") or {}).get("price"),
+        "listing_source": "RentCast" if detail.get("listing") else None,
     }
 
 
-def build_facts(model: dict, pin: str | None) -> dict:
+def subject_facts(model: dict, subject: dict | None) -> dict | None:
+    if not isinstance(subject, dict):
+        return None
+    kind = subject.get("kind")
+    if kind == "home" and subject.get("pin"):
+        try:
+            return {"kind": "home", **home_facts(parcel(model, str(subject["pin"])))}
+        except KeyError:
+            return None
+    if kind == "neighborhood" and subject.get("id"):
+        row = model["tracts"].get(str(subject["id"]))
+        if row is None:
+            return None
+        return {
+            "kind": "neighborhood",
+            "name": row.get("name"),
+            "median_land_share": row.get("median_land_share"),
+            "median_land": row.get("median_land"),
+            "median_building": row.get("median_building"),
+            "homes": row.get("homes"),
+            "lot_count": row.get("lot_count"),
+            "teardown_count": row.get("teardown_count"),
+        }
+    if kind == "county":
+        county = model["county"]
+        return {
+            "kind": "county",
+            "name": "Wake County typical",
+            "median_land_share": county["median_land_share"],
+            "median_land": county.get("median_land"),
+            "median_building": county.get("median_building"),
+        }
+    return None
+
+
+def build_facts(model: dict, pin: str | None, compare: dict | None = None) -> dict:
     facts = {
         "county_study": county_facts(model),
         "hotspots": hotspots(model),
     }
+    if isinstance(compare, dict) and (compare.get("left") or compare.get("right")):
+        facts["comparison"] = {
+            "first": subject_facts(model, compare.get("left")),
+            "second": subject_facts(model, compare.get("right")),
+            "note": "Answer about these two sides. The Compare panel gap is first minus second.",
+        }
     if pin:
         facts["selected_home"] = home_facts(parcel(model, pin))
     else:
         facts["selected_home"] = None
-        facts["no_home_note"] = "No home is selected, so answer about the county or about where lots cluster."
+        if "comparison" not in facts:
+            facts["no_home_note"] = "No home is selected, so answer about the county or about where lots cluster."
     return facts
 
 
@@ -93,12 +140,30 @@ def transcript(history: list[dict]) -> str:
         role = turn.get("role")
         text = turn.get("text")
         if role in {"you", "assistant"} and isinstance(text, str) and text.strip():
-            speaker = "Buyer" if role == "you" else "House or Lot"
+            speaker = "Buyer" if role == "you" else "Parcel"
             lines.append(f"{speaker}: {text.strip()[:MAX_TURN]}")
     return "\n".join(lines)
 
 
-def fallback(model: dict, pin: str | None) -> str:
+def _share_label(row: dict | None) -> tuple[str, float] | None:
+    if not row or row.get("land_share") is None and row.get("median_land_share") is None:
+        return None
+    share = row.get("land_share")
+    if share is None:
+        share = row.get("median_land_share")
+    name = row.get("address") or row.get("name") or "this side"
+    return name, float(share)
+
+
+def fallback(model: dict, pin: str | None, compare: dict | None = None) -> str:
+    if isinstance(compare, dict):
+        left = _share_label(subject_facts(model, compare.get("left")))
+        right = _share_label(subject_facts(model, compare.get("right")))
+        if left and right:
+            return (
+                f"{left[0]} is {left[1] * 100:.0f} percent land. "
+                f"{right[0]} is {right[1] * 100:.0f} percent land."
+            )
     county = model["county"]
     if not pin:
         share = county["median_land_share"] * 100
@@ -130,17 +195,17 @@ def _turns(history: list[dict], question: str) -> list[dict]:
     return contents
 
 
-def ask(model: dict, pin: str | None, question: str, history: list[dict]) -> dict:
+def ask(model: dict, pin: str | None, question: str, history: list[dict], compare: dict | None = None) -> dict:
     text = question.strip()[:MAX_QUESTION]
     if not text:
         raise ValueError("question is required")
-    spoken = fallback(model, pin)
+    spoken = fallback(model, pin, compare)
     load_env()
     api_key = os.environ.get("GEMINI_API_KEY", "").strip()
     if not api_key:
         return {"reply": spoken, "source": "fallback", "question": text}
 
-    facts = build_facts(model, pin)
+    facts = build_facts(model, pin, compare)
     try:
         response = requests.post(
             MODEL_URL,

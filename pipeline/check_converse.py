@@ -34,6 +34,20 @@ def main() -> None:
     home_reply = fallback(model, pin)
     assert model["homes"][0]["address"] in home_reply
 
+    other = next((home for home in model["homes"][1:] if home.get("pin") != pin), None)
+    if other:
+        compared = fallback(
+            model,
+            None,
+            {
+                "left": {"kind": "home", "pin": pin},
+                "right": {"kind": "home", "pin": other["pin"]},
+            },
+        )
+        assert model["homes"][0]["address"] in compared
+        assert other["address"] in compared
+        assert "percent land" in compared
+
     history = [
         {"role": "you", "text": "am i buying a house or a lot?"},
         {"role": "assistant", "text": "This one is priced as a house."},
@@ -42,7 +56,7 @@ def main() -> None:
     ]
     script = transcript(history)
     assert "Buyer: am i buying a house or a lot?" in script
-    assert "House or Lot: This one is priced as a house." in script
+    assert "Parcel: This one is priced as a house." in script
     assert "ignore" not in script
 
     long = [{"role": "you" if i % 2 == 0 else "assistant", "text": f"turn {i}"} for i in range(20)]

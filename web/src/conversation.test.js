@@ -1,17 +1,16 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
+import { ASK_COPY, ASK_SUGGESTIONS } from './config.js'
 import {
   HISTORY_TURNS,
   MAX_QUESTION,
-  afterAssistantSpoke,
-  afterRecognitionEnded,
+  askAboutLabel,
   normalizeQuestion,
+  prettyPlace,
   suggestedQuestions,
   toParagraphs,
-  transcriptFromResults,
   trimHistory,
-  voiceStatus,
 } from './conversation.js'
 
 test('only the last few turns are sent', () => {
@@ -48,14 +47,31 @@ test('questions are collapsed to single spaces and capped', () => {
 test('suggested questions follow whether a home is selected', () => {
   const county = suggestedQuestions(null)
   const home = suggestedQuestions({ address: '6404 JOHNSDALE RD' })
-  assert.equal(county.length, 3)
-  assert.equal(home.length, 3)
-  assert.match(county[0], /Wake County/)
-  assert.match(home[0], /house or a lot/)
+  const neighborhood = suggestedQuestions({ neighborhood: 'Tract 528.05' })
+  const compare = suggestedQuestions({ compare: true, leftName: '724 TOULOUSE CT', rightName: '209 FISHBURN DR' })
+  assert.deepEqual(county, ASK_SUGGESTIONS.county)
+  assert.deepEqual(home, ASK_SUGGESTIONS.home)
+  assert.deepEqual(neighborhood, ASK_SUGGESTIONS.neighborhood)
+  assert.deepEqual(compare, ASK_SUGGESTIONS.compare)
+  assert.match(county[1], /land a bigger share/)
   assert.notDeepEqual(county, home)
 })
 
-test('a spoken reply breaks into sentences', () => {
+test('the ask header names the current selection', () => {
+  assert.equal(askAboutLabel(), ASK_COPY.aboutCounty)
+  assert.equal(askAboutLabel({ neighborhood: 'Tract 528.05' }), 'About: Tract 528.05')
+  assert.equal(askAboutLabel({ address: '724 TOULOUSE CT', neighborhood: 'Tract 1' }), 'About: 724 Toulouse Ct')
+  assert.equal(
+    askAboutLabel({ compare: true, leftName: '724 TOULOUSE CT', rightName: '209 FISHBURN DR' }),
+    'About: 724 Toulouse Ct vs 209 Fishburn Dr',
+  )
+})
+
+test('addresses are title-cased for the ask header', () => {
+  assert.equal(prettyPlace('724 TOULOUSE CT'), '724 Toulouse Ct')
+})
+
+test('a reply breaks into sentences', () => {
   const lines = toParagraphs(
     'Your ratio is 1.212. That is above the county median of 0.951. Is that clear?',
   )
@@ -65,27 +81,4 @@ test('a spoken reply breaks into sentences', () => {
     'Is that clear?',
   ])
   assert.deepEqual(toParagraphs('One sentence only.'), ['One sentence only.'])
-})
-
-test('a recognition result keeps the final words and the words still coming', () => {
-  const heard = transcriptFromResults([
-    { isFinal: true, 0: { transcript: 'is my assessment' } },
-    { isFinal: false, 0: { transcript: ' too high' } },
-  ])
-  assert.equal(heard.final, 'is my assessment')
-  assert.equal(heard.interim, 'too high')
-  assert.equal(heard.heard, 'is my assessment too high')
-})
-
-test('silence after talking keeps the loop open, stop ends it', () => {
-  assert.equal(afterRecognitionEnded(true, 'is my assessment too high'), 'thinking')
-  assert.equal(afterRecognitionEnded(true, ''), 'listening')
-  assert.equal(afterRecognitionEnded(false, 'is my assessment too high'), 'idle')
-  assert.equal(afterAssistantSpoke(true), 'listening')
-  assert.equal(afterAssistantSpoke(false), 'idle')
-})
-
-test('the status line names the current step', () => {
-  assert.equal(voiceStatus('listening'), 'Listening — pause when you are done')
-  assert.equal(voiceStatus('idle'), '')
 })

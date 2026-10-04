@@ -8,6 +8,8 @@ import {
   hotspotSentence,
   percentText,
   saleDateText,
+  shareColor,
+  shareRange,
   shareText,
   tractColor,
   tractLabel,
@@ -52,6 +54,14 @@ test('hotspot copy uses the highest land-share tract', () => {
   assert.match(line, /Census Tract 501/)
   assert.match(line, /41%/)
   assert.match(hotspotSentence({ neighborhoods: [] }), /No neighborhood/)
+})
+
+test('share colors follow the observed land-share range', () => {
+  const range = shareRange([0.2, 0.4, 0.6])
+  assert.deepEqual(range, { min: 0.2, max: 0.6 })
+  assert.equal(shareColor(null, range), NO_DATA_COLOR)
+  assert.equal(shareColor(0.2, range), '#0369a1')
+  assert.equal(shareColor(0.6, range), '#e8d48b')
 })
 
 test('bars span the full chart without collapsing the shortest to nothing', () => {

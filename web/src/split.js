@@ -10,7 +10,37 @@ export const SCALE = [
   { limit: Infinity, color: '#e8d48b', label: 'Mostly land' },
 ]
 
-export const NO_DATA_COLOR = '#161616'
+export const NO_DATA_COLOR = '#6b7280'
+
+export const SHARE_RAMP = ['#0369a1', '#38bdf8', '#c9a227', '#e8d48b']
+
+function mixHex(left, right, amount) {
+  const parse = (hex) => [
+    parseInt(hex.slice(1, 3), 16),
+    parseInt(hex.slice(3, 5), 16),
+    parseInt(hex.slice(5, 7), 16),
+  ]
+  const a = parse(left)
+  const b = parse(right)
+  const t = Math.max(0, Math.min(1, amount))
+  const channel = (index) => Math.round(a[index] + (b[index] - a[index]) * t)
+  return `#${[channel(0), channel(1), channel(2)].map((value) => value.toString(16).padStart(2, '0')).join('')}`
+}
+
+export function shareRange(shares) {
+  const values = shares.filter((value) => value != null)
+  if (!values.length) return { min: 0, max: 1 }
+  return { min: Math.min(...values), max: Math.max(...values) }
+}
+
+export function shareColor(share, range) {
+  if (share === null || share === undefined || !range) return NO_DATA_COLOR
+  const span = range.max - range.min || 1
+  const t = Math.max(0, Math.min(1, (share - range.min) / span))
+  const scaled = t * (SHARE_RAMP.length - 1)
+  const index = Math.min(SHARE_RAMP.length - 2, Math.floor(scaled))
+  return mixHex(SHARE_RAMP[index], SHARE_RAMP[index + 1], scaled - index)
+}
 
 export const VERDICT_COLOR = {
   house: '#38bdf8',

@@ -4,103 +4,167 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#ffffff" />
-    <meta name="description" content="See whether a Wake County house is priced as a home or as a lot, using the county's own land and building split." />
+    <meta name="description" content="Parcel shows whether a Wake County house is priced as a home or as a lot, using the county's own land and building split." />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet" />
-    <title>House or Lot · Wake County land share</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/favicon.svg" />
+    <link rel="stylesheet" href="/src/style.css" />
+    <style>
+      .brand { color: #202124; text-decoration: none; }
+      .brand svg { width: 24px; height: 24px; color: #c92532; }
+      .ask-panel[hidden], #map-intro[hidden] { display: none !important; }
+      .toolbar-search { position: relative; }
+      .map-intro {
+        position: absolute;
+        top: calc(100% + 8px);
+        left: 0;
+        z-index: 950;
+      }
+    </style>
+    <title>Parcel</title>
   </head>
   <body>
     <header class="masthead">
-      <nav class="header-nav" aria-label="Main navigation"><button data-open="home">Your split</button><button data-open="neighborhood">Explore neighborhoods</button></nav>
-      <a class="brand" href="/" aria-label="House or Lot home"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 10 9-7 9 7v11h-6v-7H9v7H3Z"/></svg><span>House or Lot<span class="brand-dot">.</span></span></a>
-      <nav class="header-nav header-right" aria-label="Resources"><a href="/method.html">How it works</a><button class="primary-button" data-chat>Ask House or Lot</button></nav>
+      <a class="brand" href="/" aria-label="Parcel home"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 10 9-7 9 7v11h-6v-7H9v7H3Z"/></svg><span>Parcel<span class="brand-dot">.</span></span></a>
+      <div class="toolbar-search">
+      <form id="search-form" role="search" data-state="idle"><label class="sr" for="search">Search a Wake County address</label><input id="search" type="search" placeholder="Search a Wake County address" autocomplete="off" /><button class="search-submit" type="submit" aria-label="Search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></svg></button><span id="search-spinner" class="search-spinner" hidden></span><div id="search-results" class="search-results"></div><p id="search-status" class="search-status" role="status"></p><button id="search-retry" type="button" hidden>Retry</button></form>
+      <aside id="map-intro" class="map-intro" role="note" tabindex="0" hidden>
+        <div>
+          <strong id="hint-headline">How much of your home is actually land?</strong>
+          <span id="hint-detail">Search any Wake County address, or click a neighborhood, to see how its assessed value splits between land and building.</span>
+        </div>
+        <button type="button" id="dismiss-hint" aria-label="Dismiss hint">✕</button>
+      </aside>
+      <script>
+        (() => {
+          const card = document.getElementById('map-intro')
+          try {
+            if (sessionStorage.getItem('houseOrLotHintDismissed') === '1') return
+          } catch {}
+          card.hidden = false
+        })()
+      </script>
+      </div>
+      <div class="demos" role="group" aria-label="Try a home"><span class="demo-label">Try a home</span><button class="demo" data-query="1000 DOROTHEA DR" type="button">Dorothea Dr</button><button class="demo" data-query="100 POND BLUFF WAY" type="button">Pond Bluff Way</button><button class="demo" data-query="10105 RAVEN TREE DR" type="button">Raven Tree Dr</button></div>
+      <nav class="header-nav" aria-label="Map tools">
+        <button type="button" id="reset-map">Reset map</button>
+        <button type="button" id="export-split" disabled>Export</button>
+      </nav>
     </header>
     <nav class="nav-rail" aria-label="Map navigation">
 <button data-search class="rail-active" ><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></svg><span>Search</span></button>
-<button data-open="home" ><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 10 9-7 9 7v11h-6v-7H9v7H3Z"/></svg><span>Your home</span></button>
-<button data-open="neighborhood" ><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 21V7h7v14M10 21V3h11v18M6 11h1m-1 4h1m7-8h3m-3 4h3m-3 4h3M1 21h22"/></svg><span>Explore</span></button>
-<button data-open="county" ><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20V10m8 10V4m8 16v-7M2 21h20"/></svg><span>County</span></button>
-<button data-chat ><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11a9 9 0 0 1-9 9H4l-3 2 2-7a9 9 0 1 1 18-4Z"/><path d="M7 11h10m-10 4h6"/></svg><span>Ask</span></button>
-<a class="rail-method" href="/method.html" aria-label="About the method">?<span>Method</span></a></nav>
-    <div class="toolbar">
-      <form id="search-form" role="search"><label class="sr" for="search">Search a Wake County address</label><input id="search" type="search" placeholder="Enter a home address" autocomplete="off" /><button class="search-submit" type="submit" aria-label="Search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></svg></button><div id="search-results" class="search-results"></div></form>
-      <div class="demos"><span class="demo-label">Try a home</span><button class="demo" data-query="1000 DOROTHEA DR" type="button">Dorothea Dr</button><button class="demo" data-query="100 POND BLUFF WAY" type="button">Pond Bluff Way</button><button class="demo" data-query="10105 RAVEN TREE DR" type="button">Raven Tree Dr</button></div>
-      <p class="scope"><strong id="scope-headline">Wake County, NC</strong><span id="scope-detail">Land versus building on the 2024 roll</span></p>
-    </div>
+<button type="button" id="for-sale-toggle" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.5 3.5 3 13l8 8 9.5-9.5V3.5h-8Z"/><circle cx="15.2" cy="8.8" r="1.2"/></svg><span>For sale</span></button>
+<button type="button" id="compare-homes" aria-expanded="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="7" height="16" rx="1.5"/><rect x="14" y="4" width="7" height="16" rx="1.5"/></svg><span>Compare</span></button>
+<button data-chat aria-controls="chat-drawer" aria-expanded="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11a9 9 0 0 1-9 9H4l-3 2 2-7a9 9 0 1 1 18-4Z"/><path d="M7 11h10m-10 4h6"/></svg><span>Ask</span></button></nav>
     <main>
-      <div id="map"></div><div class="map-intro"><strong>Are you buying a house, or a lot?</strong><span>Search a home or select a neighborhood to see the land and building split.</span></div>
+      <div id="map"></div>
       <dialog id="panel" aria-label="Land share details">
         <div class="details-heading"><span>Land share details</span><button id="close-details" aria-label="Close land share details">✕</button></div>
         <div id="panel-content">
-        <div class="property-summary"><section class="card card-major" id="home-card">
-            <p class="eyebrow">Your home</p>
-            <h1 id="home-address">Search an address</h1>
-            <p id="home-meta" class="muted">
-              Pick a house to see how much of the price is land and how much is the structure.
-            </p>
+        <div class="property-summary" id="home-summary" hidden><section class="card card-major" id="home-card">
+            <h1 id="home-address"></h1>
+            <p id="home-meta" class="muted"></p>
+            <p id="listing-badge" class="listing-badge" hidden></p>
+            <div id="lot-preview" class="lot-preview" hidden></div>
+            <p id="lot-preview-note" class="lot-preview-note muted" hidden></p>
           </section><section class="card card-major" id="ratio-card" hidden>
             <p class="eyebrow">The call</p>
             <p id="home-ratio" class="score">—</p>
             <div class="meter" aria-hidden="true"><span id="ratio-fill"></span></div>
             <p id="ratio-caption"></p>
+            <p id="caution-badge" class="caution-badge" hidden></p>
             <dl class="factors" id="home-figures"></dl>
-          </section></div>
-        <div class="panel-tabs" role="tablist" aria-label="Explore land share">
-<button role="tab" id="tab-home" aria-controls="view-home" aria-selected="true" tabindex="0">Your home</button>
-<button role="tab" id="tab-neighborhood" aria-controls="view-neighborhood" aria-selected="false" tabindex="-1">Neighborhood</button>
-<button role="tab" id="tab-county" aria-controls="view-county" aria-selected="false" tabindex="-1">County</button>
-</div><div class="panel-scroll"><div class="tab-view" role="tabpanel" id="view-home" aria-labelledby="tab-home" tabindex="0"><p class="home-empty muted" id="home-empty">Start with an address above, or try one of the example homes. The land and building split will appear here.</p><section class="card" id="gap-card" hidden>
+          </section><section class="card" id="gap-card" hidden>
             <p class="eyebrow">What that means</p>
             <div id="gap-bits" class="bits"></div>
             <div class="actions">
-              <button id="hear" type="button">Hear why</button>
               <button id="save-ratio" type="button" hidden>Record on chain</button>
             </div>
             <p id="chain-note" class="muted"></p>
-          </section></div><div class="tab-view" role="tabpanel" id="view-neighborhood" aria-labelledby="tab-neighborhood" tabindex="0" hidden><section class="card card-major" id="tract-card">
-            <p class="eyebrow">Neighborhood</p>
-            <h2 id="tract-name">Click a tract</h2>
-            <p id="tract-summary" class="muted">Every census tract in Wake County is shaded by its typical land share.</p>
-            <dl class="factors" id="tract-figures"></dl>
-          </section><ul class="legend" aria-label="Map colors" id="legend"></ul><section class="card card-major">
-            <p class="eyebrow">Land share by city</p>
-            <p id="tilt-headline" class="tilt">—</p>
-            <div id="bands" class="chart" aria-label="Median land share by city"></div>
-            <p id="bands-source" class="muted"></p>
-          </section><section class="card card-major" id="buy-card">
-            <p class="eyebrow">Where lots cluster</p>
-            <p id="buy-headline" class="tilt">—</p>
-            <p id="buy-note" class="muted"></p>
-            <div id="buy-places" class="buy-places"></div>
-          </section></div><div class="tab-view" role="tabpanel" id="view-county" aria-labelledby="tab-county" tabindex="0" hidden><section class="card card-major">
-            <p class="eyebrow">Wake County split</p>
-            <p id="verdict" class="verdict">—</p>
-            <ul class="standards" id="standards"></ul>
-            <p id="verdict-note" class="muted"></p>
-          </section></div></div><div class="panel-footer"><button id="open-chat" aria-haspopup="dialog">Ask House or Lot <span aria-hidden="true">↗</span></button><span>Understand the numbers</span></div></div></dialog>
+            <p id="result-disclaimer" class="disclaimer" hidden>These are 2024 assessed values, not a sale price or what a buyer would pay for the lot. <a href="/method.html">Learn more</a></p>
+          </section></div>
+        </div></dialog>
     </main>
-    <dialog id="chat-drawer" aria-labelledby="chat-title">
-      <div class="drawer-heading"><h2 id="chat-title">Ask House or Lot</h2><button id="close-chat" aria-label="Close chat">✕</button></div>
-<section class="card card-major" id="ask-card">
-            <p class="eyebrow">Ask about this split</p>
-            <div id="chat" class="chat" aria-live="polite"></div>
-            <div id="suggestions" class="suggestions"></div>
-            <form id="ask-form">
-              <label class="sr" for="question">Ask a question</label>
-              <input id="question" type="text" placeholder="Ask anything about the numbers" autocomplete="off" />
-              <button id="ask" type="submit">Ask</button>
-            </form>
-            <div class="actions">
-              <button id="talk" type="button">Talk</button>
-              <button id="stop-talk" type="button" hidden>Stop</button>
-            </div>
-            <p id="voice-status" class="muted"></p>
-            <p class="muted" id="ask-note">
-              Click Talk, ask a question, then pause. It answers out loud and listens for the next one. Stop ends the conversation.
-            </p>
-          </section>
-    </dialog>
+    <aside id="chat-drawer" class="ask-panel" role="complementary" aria-labelledby="chat-title" aria-hidden="true" hidden>
+      <div class="ask-handle">
+        <button type="button" id="ask-expand" aria-label="Expand ask panel"><span class="ask-handle-bar"></span></button>
+      </div>
+      <header class="ask-header">
+        <div class="ask-header-copy">
+          <h2 id="chat-title">Ask Parcel</h2>
+          <p id="ask-context">About: Wake County</p>
+        </div>
+        <button id="close-chat" type="button" aria-label="Close ask">✕</button>
+      </header>
+      <div id="chat" class="chat" aria-live="polite"></div>
+      <div class="ask-suggest-block">
+        <p id="suggest-prompt" class="ask-suggest-prompt">Try one of these</p>
+        <div id="suggestions" class="suggestions"></div>
+      </div>
+      <div id="ask-error" class="ask-error" hidden role="alert">
+        <p id="ask-error-text"></p>
+        <button type="button" id="retry-ask">Retry</button>
+      </div>
+      <form id="ask-form" class="ask-composer">
+        <label class="sr" for="question">Ask a question</label>
+        <textarea id="question" rows="1" placeholder="Ask anything about the numbers" autocomplete="off"></textarea>
+        <div class="ask-tools">
+          <button id="ask" type="submit" disabled>Send</button>
+        </div>
+      </form>
+    </aside>
+    <aside id="for-sale-panel" class="sale-panel" role="complementary" aria-labelledby="for-sale-title" hidden>
+      <div class="details-heading">
+        <span id="for-sale-title">For sale</span>
+        <button type="button" id="close-for-sale" aria-label="Close for sale">✕</button>
+      </div>
+      <div class="sale-body">
+        <p class="muted sale-lead">Filter the cached listings by list price and land share.</p>
+        <div class="sale-field">
+          <p class="sale-label">Price</p>
+          <div class="sale-range">
+            <label class="sr" for="sale-price-min">Minimum list price</label>
+            <input id="sale-price-min" type="number" min="0" step="1000" placeholder="Min" inputmode="numeric" />
+            <span>to</span>
+            <label class="sr" for="sale-price-max">Maximum list price</label>
+            <input id="sale-price-max" type="number" min="0" step="1000" placeholder="Max" inputmode="numeric" />
+          </div>
+        </div>
+        <div class="sale-field">
+          <p class="sale-label">Land %</p>
+          <div class="sale-range">
+            <label class="sr" for="sale-land-min">Minimum land share</label>
+            <input id="sale-land-min" type="number" min="0" max="100" step="1" placeholder="0" inputmode="numeric" />
+            <span>to</span>
+            <label class="sr" for="sale-land-max">Maximum land share</label>
+            <input id="sale-land-max" type="number" min="0" max="100" step="1" placeholder="100" inputmode="numeric" />
+          </div>
+        </div>
+        <div class="sale-actions">
+          <button type="button" id="sale-show">Show for sale</button>
+          <button type="button" id="sale-reset">Reset</button>
+        </div>
+      </div>
+    </aside>
+    <aside id="compare-panel" class="compare-panel" role="complementary" aria-labelledby="compare-title" hidden>
+      <div class="details-heading">
+        <span id="compare-title">Compare</span>
+        <button type="button" id="close-compare" aria-label="Close compare">✕</button>
+      </div>
+      <form id="compare-form" role="search">
+        <label class="sr" for="compare-search">Search an address, neighborhood, or county typical</label>
+        <div class="compare-search-row">
+          <input id="compare-search" type="search" placeholder="Search the first address" autocomplete="off" />
+        </div>
+        <div id="compare-results" class="search-results"></div>
+        <p id="compare-status" class="search-status" role="status"></p>
+      </form>
+      <div class="compare-scroll">
+        <div id="compare-body" class="compare-body"></div>
+      </div>
+    </aside>
     <script type="module" src="/src/main.js"></script>
   </body>
 </html>

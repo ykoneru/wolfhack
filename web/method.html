@@ -3,7 +3,9 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>House or Lot method</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/favicon.svg" />
+    <title>Parcel</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet" />
@@ -11,9 +13,9 @@
   </head>
   <body>
     <article class="method">
-      <p><a href="/">← House or Lot</a></p>
+      <p><a href="/">← Parcel</a></p>
       <h1>How the split is made</h1>
-      <p>House or Lot tells a Wake County buyer how much of the official value is land and how much is the house. High land share is not a warning. Some buyers want the lot. The site names the split so you can match it to what you are shopping for.</p>
+      <p>Parcel tells a Wake County buyer how much of the official value is land and how much is the house. High land share is not a warning. Some buyers want the lot. The site names the split so you can match it to what you are shopping for.</p>
 
       <h2>Where the numbers come from</h2>
       <p>Every figure is pulled from a public source. Nothing is modelled or imputed.</p>
@@ -35,11 +37,21 @@
       <h2>Search</h2>
       <p>Any Wake County single-family house with a land and building value can be looked up, whether or not it sold recently. A last sale is shown when the county has one. It is history, not the verdict.</p>
 
-      <h2>Tracts</h2>
-      <p>A census tract is shaded when at least twenty-five single-family homes fall inside it. The color is how far that tract’s typical land share sits from the county typical. Tracts with too few homes are drawn faintly.</p>
+      <h2>For sale</h2>
+      <p>For-sale dots are the RentCast cache filtered to homes put on the market in the last 30 days. A manual script fills Wake cities one call each and skips cities already on disk. Reloading the site does not call RentCast. A list price is not the county land/building split.</p>
 
-      <h2>The spoken assistant</h2>
-      <p>Click Talk and ask out loud. The browser listens until you pause, Gemini answers from the figures for the selected home and the county split, and ElevenLabs reads the reply. Stop ends the conversation. The model is not allowed to invent a tax rate, a list price, or a rebuild cost.</p>
+      <h2>Tracts</h2>
+      <p>A census tract is shaded when at least twenty-five single-family homes fall inside it. The map color is that tract’s median land share — the middle home’s land dollars divided by land plus building — stretched across the range of Wake tracts with enough homes. Tracts with too few homes are gray.</p>
+
+      <h2>Ask</h2>
+      <p>Type a question about the selected home or the county split. Gemini answers from those figures only. The model is not allowed to invent a tax rate, a list price, or a rebuild cost.</p>
+
+      <h2>What the assessed split is not</h2>
+      <p>The dollars on this site are county assessed values from the 2024 revaluation, a mass appraisal. They are not market prices, and they are not what a buyer would pay for the lot today.</p>
+      <p>Land values are typically set from benchmark prices per acre or per lot. They can include site improvements such as grading, utilities, and driveways, so they may not equal bare-land market value.</p>
+      <p>Extremely high or low land/building splits can reflect appraisal quirks rather than real economics. In teardown and redevelopment areas, an older house may have a depressed building value while the market is pricing the lot, so the split can understate the “real” land share.</p>
+      <p>The roll will be out of date as sales and new construction happen between revaluations. Wake’s next countywide revaluation is scheduled for 2028.</p>
+      <p>Neighborhoods with fewer than 25 single-family homes are drawn gray as insufficient data. A typical land share is not reported there.</p>
 
       <h2>What this cannot say</h2>
       <p>A teardown watch is not a demolition order. The county cannot see a renovation, a historic overlay, or a buyer who intends to stay. This page cannot see inside a house. It can only show how the official roll split the price between dirt and structure.</p>

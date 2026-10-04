@@ -1,4 +1,4 @@
-"""House or Lot API. Wake County land vs building values, by address and tract.
+"""Parcel API. Wake County land vs building values, by address and tract.
 
 Run from the repo root:
 
@@ -10,10 +10,10 @@ GET /parcel?pin=0794369620
 GET /tract?id=37183052505
 GET /cities
 GET /hotspots
+GET /listings
+GET /discover
 
 POST /ask
-POST /explain
-POST /speak
 """
 
 from __future__ import annotations
@@ -32,8 +32,7 @@ if str(ROOT) not in sys.path:
 
 from api.commit import send_memo, wallet_ready  # noqa: E402
 from api.converse import ask  # noqa: E402
-from api.fair import cities, explain, hotspots, load_model, parcel, search, tract  # noqa: E402
-from api.speech import synthesize  # noqa: E402
+from api.fair import cities, discover_homes, hotspots, listings, load_model, parcel, search, tract  # noqa: E402
 
 MODEL: dict = {}
 
@@ -69,14 +68,6 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _send_audio(self, audio: bytes) -> None:
-        self.send_response(200)
-        self.send_header("Content-Type", "audio/mpeg")
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Content-Length", str(len(audio)))
-        self.end_headers()
-        self.wfile.write(audio)
-
     def do_OPTIONS(self) -> None:  # noqa: N802
         self._send(204, {})
 
@@ -102,11 +93,20 @@ class Handler(BaseHTTPRequestHandler):
             if parsed.path == "/hotspots":
                 self._send(200, hotspots(MODEL))
                 return
+            if parsed.path == "/listings":
+                self._send(200, listings(MODEL))
+                return
+            if parsed.path == "/discover":
+                self._send(200, discover_homes(MODEL))
+                return
             if parsed.path == "/appeal":
                 self._send(200, {"ready": wallet_ready()})
                 return
         except KeyError:
             self._send(404, {"error": "not found"})
+            return
+        except requests.RequestException as error:
+            self._send(503, {"error": str(error)})
             return
         except ValueError as error:
             self._send(400, {"error": str(error)})
@@ -115,18 +115,12 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802
         path = urlparse(self.path).path
-        if path not in {"/explain", "/speak", "/appeal", "/ask"}:
+        if path not in {"/appeal", "/ask"}:
             self._send(404, {"error": "not found"})
             return
         length = int(self.headers.get("Content-Length", "0"))
         try:
             payload = json.loads(self.rfile.read(length) or b"{}")
-            if path == "/speak":
-                text = str(payload.get("text", "")).strip()
-                if not text:
-                    raise ValueError("text is required")
-                self._send_audio(synthesize(text[:800]))
-                return
             if path == "/ask":
                 history = payload.get("history")
                 self._send(
@@ -136,26 +130,24 @@ class Handler(BaseHTTPRequestHandler):
                         pin_from(payload),
                         str(payload.get("question", "")),
                         history if isinstance(history, list) else [],
+                        payload.get("compare") if isinstance(payload.get("compare"), dict) else None,
                     ),
                 )
                 return
             pin = pin_from(payload)
             if not pin:
                 raise ValueError("pin is required")
-            if path == "/appeal":
-                detail = parcel(MODEL, pin)
-                memo = f"lot:{pin}:{detail['land_share']:.3f}"
-                signature = send_memo(memo)
-                self._send(
-                    200,
-                    {
-                        "memo": memo,
-                        "signature": signature,
-                        "explorer_url": f"https://explorer.solana.com/tx/{signature}?cluster=devnet",
-                    },
-                )
-                return
-            self._send(200, explain(MODEL, pin))
+            detail = parcel(MODEL, pin)
+            memo = f"lot:{pin}:{detail['land_share']:.3f}"
+            signature = send_memo(memo)
+            self._send(
+                200,
+                {
+                    "memo": memo,
+                    "signature": signature,
+                    "explorer_url": f"https://explorer.solana.com/tx/{signature}?cluster=devnet",
+                },
+            )
         except KeyError:
             self._send(404, {"error": "unknown parcel"})
         except (RuntimeError, requests.RequestException) as error:
@@ -170,7 +162,7 @@ class Handler(BaseHTTPRequestHandler):
 def main() -> None:
     load()
     server = ThreadingHTTPServer(("127.0.0.1", 8000), Handler)
-    print("House or Lot API at http://127.0.0.1:8000/county, /search, /parcel, /tract", flush=True)
+    print("Parcel API at http://127.0.0.1:8000/county, /search, /parcel, /tract", flush=True)
     server.serve_forever()
 
 

@@ -1,5 +1,7 @@
-// Conversation state for the spoken assistant. Kept separate from the DOM so
-// the trimming and prompt rules can be tested.
+// Conversation state for Ask. Kept separate from the DOM so the trimming and
+// prompt rules can be tested.
+
+import { ASK_COPY, ASK_SUGGESTIONS } from './config.js'
 
 export const HISTORY_TURNS = 6
 export const MAX_QUESTION = 400
@@ -17,60 +19,38 @@ export function normalizeQuestion(question) {
   return question.replace(/\s+/g, ' ').trim().slice(0, MAX_QUESTION)
 }
 
-// Questions worth asking change once a home is on screen.
-export function suggestedQuestions(home) {
-  if (!home) {
-    return [
-      'What is Wake County’s typical land share?',
-      'Where is the typical purchase more land?',
-      'What does teardown watch mean?',
-    ]
-  }
-  return [
-    'Am I buying a house or a lot?',
-    'How does this compare to my neighborhood?',
-    'Would a remodel pay off here?',
-  ]
+export function prettyPlace(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/\b([a-z])/g, (letter) => letter.toUpperCase())
 }
 
-// Read aloud, a reply works better as short spoken chunks than one block.
+export function askAboutLabel(context = {}) {
+  if (context.compare) {
+    const left = context.leftName ? prettyPlace(context.leftName) : ''
+    const right = context.rightName ? prettyPlace(context.rightName) : ''
+    if (left && right) return `About: ${left} vs ${right}`
+    if (left) return `About: ${left} and a second home`
+    return 'About: this comparison'
+  }
+  if (context.address) return `About: ${prettyPlace(context.address)}`
+  if (context.neighborhood) return `About: ${context.neighborhood}`
+  return ASK_COPY.aboutCounty
+}
+
+// Questions worth asking change once a home, comparison, or neighborhood is on screen.
+export function suggestedQuestions(context) {
+  if (context?.compare) return [...ASK_SUGGESTIONS.compare]
+  if (context?.address) return [...ASK_SUGGESTIONS.home]
+  if (context?.neighborhood) return [...ASK_SUGGESTIONS.neighborhood]
+  return [...ASK_SUGGESTIONS.county]
+}
+
 export function toParagraphs(reply) {
   return reply
     .split(/(?<=[.?!])\s+/)
     .map((line) => line.trim())
     .filter(Boolean)
-}
-
-export function transcriptFromResults(results) {
-  let finalText = ''
-  let interimText = ''
-  for (let i = 0; i < results.length; i += 1) {
-    const result = results[i]
-    const piece = result[0]?.transcript || ''
-    if (result.isFinal) finalText += ` ${piece}`
-    else interimText += ` ${piece}`
-  }
-  return {
-    final: normalizeQuestion(finalText),
-    interim: normalizeQuestion(interimText),
-    heard: normalizeQuestion(`${finalText} ${interimText}`),
-  }
-}
-
-// After the browser decides you have stopped talking: answer if there is a
-// sentence, otherwise keep listening. Stop always returns to idle.
-export function afterRecognitionEnded(live, heard) {
-  if (!live) return 'idle'
-  return heard ? 'thinking' : 'listening'
-}
-
-export function afterAssistantSpoke(live) {
-  return live ? 'listening' : 'idle'
-}
-
-export function voiceStatus(state) {
-  if (state === 'listening') return 'Listening — pause when you are done'
-  if (state === 'thinking') return 'Thinking…'
-  if (state === 'speaking') return 'Speaking…'
-  return ''
 }

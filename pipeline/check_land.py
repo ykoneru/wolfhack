@@ -9,6 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from pipeline.address import address_matches, canonical_address
 from pipeline.land import advice, classify, land_share, median, verdict_label
 
 
@@ -24,6 +25,8 @@ def main() -> None:
     assert "house is the larger piece" in advice("house").lower()
     assert "if you want the land" in advice("teardown").lower()
     assert median([0.2, 0.3, 0.4]) == 0.3
+    assert canonical_address("724 TOULOUSE CT") == "724 toulouse court"
+    assert address_matches("724 Toulouse Ct", "724 TOULOUSE COURT", "CARY")
     print("land checks passed")
 
 

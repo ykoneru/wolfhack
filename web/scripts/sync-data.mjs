@@ -13,6 +13,6 @@ if (!graded.length) throw new Error('no tract has enough homes to grade')
 if (typeof graded[0].properties.median_land_share !== 'number') throw new Error('a graded tract has no land share')
 
 console.log(
-  `House or Lot ready: ${tracts.features.length} Wake County tracts, ${graded.length} graded, ` +
+  `Parcel ready: ${tracts.features.length} Wake County tracts, ${graded.length} graded, ` +
     `${county.homes.toLocaleString('en-US')} homes, typical land share ${county.median_land_share}`,
 )
