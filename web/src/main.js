@@ -467,11 +467,28 @@ function tractStyle(feature) {
 }
 
 async function loadCounty() {
-  county = await (await fetch(`${API}/county`)).json()
+  try {
+    const response = await fetch(`${API}/county`)
+    if (response.ok) {
+      county = await response.json()
+      return
+    }
+  } catch {}
+  try {
+    const land = await (await fetch('/land.json')).json()
+    county = land.county_stats || { median_land_share: 0.2567 }
+  } catch {
+    county = { median_land_share: 0.2567 }
+  }
 }
 
 async function loadListings() {
-  const response = await fetch(`${API}/listings`)
+  let response
+  try {
+    response = await fetch(`${API}/listings`)
+  } catch {
+    return
+  }
   if (!response.ok) return
   const payload = await response.json()
   listingFetchedAt = payload.fetched_at || null
@@ -1240,5 +1257,7 @@ renderSuggestions()
 initHint()
 syncExport()
 await Promise.all([loadCounty(), loadTracts(), loadListings()])
-const walletReady = await fetch(`${API}/appeal`).then((response) => response.json())
-if (walletReady.ready) saveButton.hidden = false
+try {
+  const walletReady = await fetch(`${API}/appeal`).then((response) => response.json())
+  if (walletReady.ready) saveButton.hidden = false
+} catch {}
