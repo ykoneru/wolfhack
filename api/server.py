@@ -40,6 +40,8 @@ MODEL: dict = {}
 ALLOWED_ORIGINS = {
     "https://buyparcel.vip",
     "https://www.buyparcel.vip",
+    "http://buyparcel.vip",
+    "http://www.buyparcel.vip",
     "http://127.0.0.1:5173",
     "http://localhost:5173",
 }
