@@ -56,6 +56,7 @@ export const ASK_COPY = {
   expand: 'Expand ask panel',
   collapse: 'Shrink ask panel',
   error: 'The assistant is unreachable. Check that the API is running.',
+  limited: 'Ask is limited to 8 questions every 10 minutes. Try again shortly.',
 }
 
 export const ASK_SUGGESTIONS = {

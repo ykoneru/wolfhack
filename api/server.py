@@ -33,6 +33,7 @@ if str(ROOT) not in sys.path:
 from api.commit import send_memo, wallet_ready  # noqa: E402
 from api.converse import ask  # noqa: E402
 from api.fair import cities, discover_homes, hotspots, listings, load_model, parcel, search, tract  # noqa: E402
+from api.limits import LIMITED_MESSAGE, allow_ask, client_ip  # noqa: E402
 
 MODEL: dict = {}
 
@@ -57,13 +58,16 @@ def load() -> None:
 
 
 class Handler(BaseHTTPRequestHandler):
-    def _send(self, status: int, payload: dict | list) -> None:
+    def _send(self, status: int, payload: dict | list, extra_headers: dict[str, str] | None = None) -> None:
         body = json.dumps(payload).encode()
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        if extra_headers:
+            for key, value in extra_headers.items():
+                self.send_header(key, value)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
@@ -122,6 +126,14 @@ class Handler(BaseHTTPRequestHandler):
         try:
             payload = json.loads(self.rfile.read(length) or b"{}")
             if path == "/ask":
+                allowed, retry_after = allow_ask(client_ip(self))
+                if not allowed:
+                    self._send(
+                        429,
+                        {"error": LIMITED_MESSAGE},
+                        extra_headers={"Retry-After": str(retry_after)},
+                    )
+                    return
                 history = payload.get("history")
                 self._send(
                     200,

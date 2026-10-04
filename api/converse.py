@@ -7,6 +7,7 @@ import os
 import requests
 
 from api.fair import hotspots, parcel
+from api.limits import take_gemini_slot
 from api.settings import MODEL_URL, load_env
 
 HISTORY_TURNS = 6
@@ -202,7 +203,7 @@ def ask(model: dict, pin: str | None, question: str, history: list[dict], compar
     spoken = fallback(model, pin, compare)
     load_env()
     api_key = os.environ.get("GEMINI_API_KEY", "").strip()
-    if not api_key:
+    if not api_key or not take_gemini_slot():
         return {"reply": spoken, "source": "fallback", "question": text}
 
     facts = build_facts(model, pin, compare)

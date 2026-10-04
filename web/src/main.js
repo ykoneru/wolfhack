@@ -813,6 +813,12 @@ async function sendQuestion(raw) {
       }),
     })
     const payload = await response.json()
+    if (response.status === 429) {
+      lastFailedQuestion = question
+      setAskError(payload.error || ASK_COPY.limited)
+      renderChat()
+      return
+    }
     if (!response.ok && !payload.reply) throw new Error('ask failed')
     const reply = payload.reply || payload.error || 'That did not go through. Try again.'
     history.push({ role: 'assistant', text: reply })
