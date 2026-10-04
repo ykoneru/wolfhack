@@ -482,15 +482,26 @@ async function loadCounty() {
   }
 }
 
-async function loadListings() {
-  let response
+async function fetchListingsPayload() {
   try {
-    response = await fetch(`${API}/listings`)
+    const response = await fetch(`${API}/listings`)
+    if (response.ok) {
+      const payload = await response.json()
+      if ((payload.listings || []).length) return payload
+    }
+  } catch {}
+  try {
+    const response = await fetch('/listings.json')
+    if (!response.ok) return null
+    return await response.json()
   } catch {
-    return
+    return null
   }
-  if (!response.ok) return
-  const payload = await response.json()
+}
+
+async function loadListings() {
+  const payload = await fetchListingsPayload()
+  if (!payload) return
   listingFetchedAt = payload.fetched_at || null
   listingWindowDays = Number(payload.window_days) || 30
   listingRows = (payload.listings || []).filter((row) => row.lat && row.lon)

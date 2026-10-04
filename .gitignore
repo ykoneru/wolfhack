@@ -7,6 +7,7 @@ node_modules/
 .DS_Store
 data/raw/
 data/.rentcast-week
+data/listings.json
 data/listings.lock
 docs/Parcel-WolfHacks-pitch.pptx
 docs/make_pitch_deck.py
