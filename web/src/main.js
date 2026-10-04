@@ -546,6 +546,7 @@ function paintListingLayer() {
           { direction: 'top', className: 'map-tooltip' },
         )
         .on('click', () => {
+          closeSale()
           searchInput.value = row.address
           document.querySelector('#search-form').requestSubmit()
         }),

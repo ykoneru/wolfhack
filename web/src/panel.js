@@ -9,6 +9,7 @@ function syncDetailsOpen() {
 }
 
 export function openDetails() {
+  document.querySelector('#close-for-sale')?.click()
   if (!sheet.open) sheet.show()
   syncDetailsOpen()
   document.querySelector('[data-search]').classList.remove('rail-active')

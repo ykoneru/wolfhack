@@ -47,6 +47,16 @@ ALLOWED_ORIGINS = {
 }
 
 
+def json_safe(value):
+    if isinstance(value, float) and (value != value or value in (float("inf"), float("-inf"))):
+        return None
+    if isinstance(value, dict):
+        return {key: json_safe(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [json_safe(item) for item in value]
+    return value
+
+
 def pin_from(payload: dict) -> str | None:
     value = payload.get("pin")
     if value is None:
@@ -68,7 +78,7 @@ def load() -> None:
 
 class Handler(BaseHTTPRequestHandler):
     def _send(self, status: int, payload: dict | list, extra_headers: dict[str, str] | None = None) -> None:
-        body = json.dumps(payload).encode()
+        body = json.dumps(json_safe(payload)).encode()
         self.send_response(status)
         origin = self.headers.get("Origin", "")
         allowed = origin if origin in ALLOWED_ORIGINS else "https://buyparcel.vip"
