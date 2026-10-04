@@ -12,7 +12,6 @@ import sys
 from collections import Counter, defaultdict
 from pathlib import Path
 
-import geopandas as gpd
 from shapely.geometry import Point
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -88,7 +87,9 @@ def load_homes() -> list[dict]:
     return rows
 
 
-def wake_tracts() -> gpd.GeoDataFrame:
+def wake_tracts():
+    import geopandas as gpd
+
     document = json.loads(TRACTS_PATH.read_text())
     features = [
         feature for feature in document["features"]
@@ -126,6 +127,8 @@ def summarise(homes: list[dict]) -> dict:
 
 
 def main() -> None:
+    import geopandas as gpd
+
     raw = load_homes()
     print(f"homes read {len(raw)}", flush=True)
 

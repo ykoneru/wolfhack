@@ -19,6 +19,7 @@ POST /ask
 from __future__ import annotations
 
 import json
+import os
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -173,8 +174,10 @@ class Handler(BaseHTTPRequestHandler):
 
 def main() -> None:
     load()
-    server = ThreadingHTTPServer(("127.0.0.1", 8000), Handler)
-    print("Parcel API at http://127.0.0.1:8000/county, /search, /parcel, /tract", flush=True)
+    port = int(os.environ.get("PORT", "8000"))
+    host = "0.0.0.0" if os.environ.get("PORT") else "127.0.0.1"
+    server = ThreadingHTTPServer((host, port), Handler)
+    print(f"Parcel API at http://{host}:{port}/county, /search, /parcel, /tract", flush=True)
     server.serve_forever()
 
 
